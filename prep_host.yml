@@ -105,11 +105,14 @@
       register: distrosync
       changed_when: "'Nothing to do' not in distrosync.stdout"
 
-    - name: Update all packages
+    - name: Update all packages (excluding conflicting qpid-proton)
       ansible.builtin.dnf:
         name: "*"
         state: latest
         update_cache: true
+        exclude:
+          - qpid-proton-c
+          - python3-qpid-proton
       register: dnf_update
       ignore_errors: true
 

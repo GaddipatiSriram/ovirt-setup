@@ -160,6 +160,52 @@
         state: absent
         ovirt_auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
 
+    # Apply any pending host updates (excluding problematic packages)
+    - name: Update all host packages
+      ansible.builtin.dnf:
+        name: "*"
+        state: latest
+        update_cache: true
+        exclude:
+          - qpid-proton-c
+          - python3-qpid-proton
+      register: host_updates
+
+    - name: Display update result
+      ansible.builtin.debug:
+        msg: "Host packages updated: {{ host_updates.changed }}"
+
+    # Create engine backup
+    - name: Create backup directory
+      ansible.builtin.file:
+        path: /var/lib/ovirt-engine-backup
+        state: directory
+        owner: root
+        group: root
+        mode: '0750'
+
+    - name: Create backup log directory
+      ansible.builtin.file:
+        path: /var/log/ovirt-engine-backup
+        state: directory
+        owner: root
+        group: root
+        mode: '0750'
+
+    - name: Create initial engine backup
+      ansible.builtin.command:
+        cmd: >
+          engine-backup --mode=backup
+          --file=/var/lib/ovirt-engine-backup/backup-{{ ansible_date_time.date }}.tar.gz
+          --log=/var/log/ovirt-engine-backup/backup-{{ ansible_date_time.date }}.log
+      register: backup_result
+      changed_when: backup_result.rc == 0
+
+    - name: Display backup result
+      ansible.builtin.debug:
+        msg: "Engine backup created: /var/lib/ovirt-engine-backup/backup-{{ ansible_date_time.date }}.tar.gz"
+      when: backup_result is succeeded
+
     # Cleanup answer file
     - name: Cleanup answer file
       ansible.builtin.file:
