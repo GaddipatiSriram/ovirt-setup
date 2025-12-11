@@ -1,0 +1,144 @@
+---
+# create_datacenters.yml - Create enterprise clusters in Default datacenter
+# Run: ansible-playbook -i inventory.ini create_datacenters.yml
+
+- name: Create Enterprise Clusters in Default Datacenter
+  hosts: engine
+  become: true
+  gather_facts: true
+
+  vars:
+    datacenter_name: "Default"
+
+    # Management clusters - Infrastructure & Security Services
+    mgmt_clusters:
+      - name: "Mgmt-DMZ"
+        description: "DMZ for admin access, bastion hosts, VPN gateways"
+      - name: "Mgmt-Observability"
+        description: "Monitoring, logging, metrics (Grafana, Prometheus, ELK)"
+      - name: "Mgmt-DevOps"
+        description: "CI/CD and automation (ArgoCD, Jenkins, Ansible)"
+      - name: "Mgmt-Identity"
+        description: "Identity services (LDAP, Keycloak, AD)"
+      - name: "Mgmt-Security"
+        description: "Security services (firewalls, IDS/IPS, SIEM)"
+      - name: "Mgmt-Backup"
+        description: "Backup infrastructure"
+      - name: "Mgmt-Network"
+        description: "Network services (pfSense, CoreDNS, DHCP, NTP)"
+
+    # Development clusters
+    dev_clusters:
+      - name: "Dev-DMZ"
+        description: "Dev load balancers, reverse proxies"
+      - name: "Dev-Web"
+        description: "Dev web servers"
+      - name: "Dev-App"
+        description: "Dev application servers"
+      - name: "Dev-Database"
+        description: "Dev databases (PostgreSQL, MySQL)"
+      - name: "Dev-Messaging"
+        description: "Dev messaging (Kafka, RabbitMQ, Redis)"
+
+    # Production clusters
+    prod_clusters:
+      - name: "Prod-DMZ"
+        description: "Prod load balancers, WAF, reverse proxies"
+      - name: "Prod-Web"
+        description: "Prod web servers"
+      - name: "Prod-App"
+        description: "Prod application servers"
+      - name: "Prod-Database"
+        description: "Prod databases (PostgreSQL, MySQL)"
+      - name: "Prod-Messaging"
+        description: "Prod messaging (Kafka, RabbitMQ, Redis)"
+      - name: "Prod-Cache"
+        description: "Prod caching (Redis, Memcached)"
+      - name: "Prod-API"
+        description: "Prod API gateways, service mesh"
+      - name: "Prod-DR"
+        description: "Disaster recovery, standby systems"
+
+  tasks:
+    - name: Obtain SSO token from oVirt Engine
+      ovirt.ovirt.ovirt_auth:
+        url: "https://{{ ovirt_engine_fqdn }}/ovirt-engine/api"
+        username: "admin@ovirt@internalsso"
+        password: "{{ ovirt_engine_admin_password }}"
+        insecure: true
+      register: ovirt_auth
+
+    # ==================== MANAGEMENT CLUSTERS ====================
+    - name: Create Management clusters
+      ovirt.ovirt.ovirt_cluster:
+        auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+        name: "{{ item.name }}"
+        data_center: "{{ datacenter_name }}"
+        description: "{{ item.description }}"
+        cpu_arch: x86_64
+        compatibility_version: "4.7"
+        ballooning: true
+        ksm: true
+        memory_policy: server
+        state: present
+      loop: "{{ mgmt_clusters }}"
+
+    # ==================== DEVELOPMENT CLUSTERS ====================
+    - name: Create Development clusters
+      ovirt.ovirt.ovirt_cluster:
+        auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+        name: "{{ item.name }}"
+        data_center: "{{ datacenter_name }}"
+        description: "{{ item.description }}"
+        cpu_arch: x86_64
+        compatibility_version: "4.7"
+        ballooning: true
+        ksm: true
+        memory_policy: server
+        state: present
+      loop: "{{ dev_clusters }}"
+
+    # ==================== PRODUCTION CLUSTERS ====================
+    - name: Create Production clusters
+      ovirt.ovirt.ovirt_cluster:
+        auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+        name: "{{ item.name }}"
+        data_center: "{{ datacenter_name }}"
+        description: "{{ item.description }}"
+        cpu_arch: x86_64
+        compatibility_version: "4.7"
+        ballooning: true
+        ksm: true
+        memory_policy: server
+        ha_reservation: true
+        state: present
+      loop: "{{ prod_clusters }}"
+
+    # ==================== CLEANUP ====================
+    - name: Revoke SSO token
+      ovirt.ovirt.ovirt_auth:
+        state: absent
+        ovirt_auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+
+    - name: Display summary
+      ansible.builtin.debug:
+        msg:
+          - "=============================================="
+          - "Enterprise Clusters Created in Default DC"
+          - "=============================================="
+          - ""
+          - "MANAGEMENT (7 clusters):"
+          - "  Mgmt-DMZ, Mgmt-Observability, Mgmt-DevOps,"
+          - "  Mgmt-Identity, Mgmt-Security, Mgmt-Backup, Mgmt-Network"
+          - ""
+          - "DEVELOPMENT (5 clusters):"
+          - "  Dev-DMZ, Dev-Web, Dev-App,"
+          - "  Dev-Database, Dev-Messaging"
+          - ""
+          - "PRODUCTION (8 clusters):"
+          - "  Prod-DMZ, Prod-Web, Prod-App, Prod-Database,"
+          - "  Prod-Messaging, Prod-Cache, Prod-API, Prod-DR"
+          - ""
+          - "=============================================="
+          - "Total: 20 clusters + Default = 21 clusters"
+          - "=============================================="
