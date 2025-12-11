@@ -1,0 +1,6 @@
+# NFS Exports for oVirt Storage
+# Managed by Ansible
+
+{{ ovirt_storage_path }} {{ ovirt_nfs_network }}(rw,sync,no_subtree_check,no_root_squash,insecure,anonuid=36,anongid=36)
+{{ ovirt_iso_path }} {{ ovirt_nfs_network }}(rw,sync,no_subtree_check,no_root_squash,insecure,anonuid=36,anongid=36)
+{{ ovirt_export_path }} {{ ovirt_nfs_network }}(rw,sync,no_subtree_check,no_root_squash,insecure,anonuid=36,anongid=36)

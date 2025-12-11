@@ -1,0 +1,193 @@
+---
+# post_install.yml - Post-installation tasks for oVirt Engine
+# Reference: https://www.ovirt.org/documentation/installing_ovirt_as_a_standalone_manager_with_local_databases/
+# Run: ansible-playbook -i inventory.ini post_install.yml
+
+- name: Post-installation configuration
+  hosts: engine
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Assert running on EL9
+      ansible.builtin.assert:
+        that:
+          - ansible_distribution_major_version == "9"
+          - ansible_os_family == "RedHat"
+        fail_msg: "This playbook only supports EL9 (Rocky/RHEL/AlmaLinux 9). Do not run on EL8/EL10."
+        success_msg: "Running on supported EL9 system"
+
+  tasks:
+    # Install host packages before adding to engine
+    - name: Install oVirt host packages
+      ansible.builtin.dnf:
+        name:
+          - vdsm
+          - vdsm-client
+          - ovirt-host
+          - ovirt-hosted-engine-setup
+          - python3-ovirt-engine-sdk4
+        state: present
+
+    # Obtain authentication token (use admin@ovirt for Keycloak SSO)
+    - name: Obtain SSO token from oVirt Engine
+      ovirt.ovirt.ovirt_auth:
+        url: "https://{{ ovirt_engine_fqdn }}/ovirt-engine/api"
+        username: "admin@ovirt@internalsso"
+        password: "{{ ovirt_engine_admin_password }}"
+        insecure: true
+      register: ovirt_auth
+
+    # Ensure datacenter exists
+    - name: Ensure Default datacenter exists
+      ovirt.ovirt.ovirt_datacenter:
+        auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+        name: "{{ ovirt_datacenter_name }}"
+        local: false
+        compatibility_version: "4.5"
+        state: present
+
+    # Ensure cluster exists
+    - name: Ensure Default cluster exists
+      ovirt.ovirt.ovirt_cluster:
+        auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+        name: "{{ ovirt_cluster_name }}"
+        data_center: "{{ ovirt_datacenter_name }}"
+        cpu_arch: x86_64
+        compatibility_version: "4.5"
+        state: present
+
+    # Add this host to oVirt
+    - name: Add localhost as oVirt host
+      ovirt.ovirt.ovirt_host:
+        auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+        name: "{{ ovirt_host_name }}"
+        address: "{{ ovirt_host_address }}"
+        cluster: "{{ ovirt_cluster_name }}"
+        password: "{{ host_root_password }}"
+        override_iptables: true
+        state: present
+      register: host_add_result
+      ignore_errors: true
+
+    - name: Display host addition result
+      ansible.builtin.debug:
+        var: host_add_result
+      when: host_add_result is defined
+
+    # Wait for host to come up (if successfully added)
+    - name: Wait for host installation and activation
+      ovirt.ovirt.ovirt_host_info:
+        auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+        pattern: "name={{ ovirt_host_name }}"
+      register: host_info
+      until: >
+        host_info.ovirt_hosts | length > 0 and
+        host_info.ovirt_hosts[0].status in ['up', 'non_operational', 'maintenance']
+      retries: 60
+      delay: 30
+      when: host_add_result is succeeded
+      ignore_errors: true
+
+    - name: Display host status
+      ansible.builtin.debug:
+        msg: "Host status: {{ host_info.ovirt_hosts[0].status | default('unknown') }}"
+      when: host_info.ovirt_hosts is defined and host_info.ovirt_hosts | length > 0
+
+    # Add Direct LUN storage domain (uses multipath device directly)
+    - name: Add Direct LUN data storage domain
+      ovirt.ovirt.ovirt_storage_domain:
+        auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+        name: "{{ ovirt_lun_storage_name }}"
+        host: "{{ ovirt_host_name }}"
+        data_center: "{{ ovirt_datacenter_name }}"
+        domain_function: data
+        fcp:
+          lun_id: "{{ ovirt_lun_id }}"
+        state: present
+      when:
+        - ovirt_storage_type | default('none') == 'lun'
+        - host_info.ovirt_hosts is defined
+        - host_info.ovirt_hosts | length > 0
+        - host_info.ovirt_hosts[0].status == 'up'
+        - ovirt_lun_id is defined
+      register: lun_storage_result
+      ignore_errors: true
+
+    - name: Display storage domain result
+      ansible.builtin.debug:
+        msg: "Storage domain '{{ ovirt_lun_storage_name }}' added: {{ lun_storage_result.changed | default(false) }}"
+      when:
+        - ovirt_storage_type | default('none') == 'lun'
+        - lun_storage_result is defined
+
+    - name: Skip storage setup message
+      ansible.builtin.debug:
+        msg: "Storage setup skipped (ovirt_storage_type={{ ovirt_storage_type | default('none') }}). Add storage manually via Admin Portal."
+      when: ovirt_storage_type | default('none') == 'none'
+
+    # Add NFS ISO storage domain
+    - name: Add NFS ISO storage domain
+      ovirt.ovirt.ovirt_storage_domain:
+        auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+        name: "{{ ovirt_iso_domain_name }}"
+        host: "{{ ovirt_host_name }}"
+        data_center: "{{ ovirt_datacenter_name }}"
+        domain_function: iso
+        nfs:
+          address: "{{ ovirt_host_address }}"
+          path: "{{ ovirt_iso_domain_path }}"
+          version: "v4_1"
+        state: present
+      when:
+        - ovirt_iso_domain_enabled | default(false)
+        - host_info.ovirt_hosts is defined
+        - host_info.ovirt_hosts | length > 0
+        - host_info.ovirt_hosts[0].status == 'up'
+      register: iso_storage_result
+      ignore_errors: true
+
+    - name: Display ISO domain result
+      ansible.builtin.debug:
+        msg: "ISO domain '{{ ovirt_iso_domain_name }}' added: {{ iso_storage_result.changed | default(false) }}"
+      when:
+        - ovirt_iso_domain_enabled | default(false)
+        - iso_storage_result is defined
+
+    # Revoke SSO token
+    - name: Revoke SSO token
+      ovirt.ovirt.ovirt_auth:
+        state: absent
+        ovirt_auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+
+    # Cleanup answer file
+    - name: Cleanup answer file
+      ansible.builtin.file:
+        path: /root/engine-answers.conf
+        state: absent
+
+    # Display final status
+    - name: Display final status
+      ansible.builtin.debug:
+        msg:
+          - "=============================================="
+          - "oVirt Engine Post-Installation Complete!"
+          - "=============================================="
+          - "Admin Portal: https://{{ ovirt_engine_fqdn }}/ovirt-engine/"
+          - "VM Portal: https://{{ ovirt_engine_fqdn }}/ovirt-engine/web-ui"
+          - "Username: admin@ovirt (Keycloak SSO)"
+          - "Password: {{ ovirt_engine_admin_password }}"
+          - "=============================================="
+          - "Datacenter: {{ ovirt_datacenter_name }}"
+          - "Cluster: {{ ovirt_cluster_name }}"
+          - "Host: {{ ovirt_host_name }}"
+          - "=============================================="
+          - "Storage Domains:"
+          - "  Data: {{ ovirt_lun_storage_name }} (Direct LUN)"
+          - "  ISO:  {{ ovirt_iso_domain_name }} ({{ ovirt_iso_domain_path }})"
+          - "=============================================="
+          - ""
+          - "*** MANUAL REBOOT REQUIRED ***"
+          - "Please reboot the system to complete installation:"
+          - "  sudo reboot"
+          - "=============================================="

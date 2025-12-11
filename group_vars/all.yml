@@ -1,0 +1,52 @@
+---
+# oVirt Engine Configuration
+ovirt_engine_fqdn: "ovirt.engatwork.com"
+ovirt_engine_organization: "engatwork.com"
+ovirt_engine_admin_password: "unix"
+
+# Host enrollment password
+host_root_password: "unix"
+
+# oVirt Engine setup options
+ovirt_engine_db_host: "localhost"
+ovirt_engine_db_port: 5432
+ovirt_engine_db_name: "engine"
+ovirt_engine_db_user: "engine"
+ovirt_engine_db_password: "unix"
+
+# DWH Database
+ovirt_engine_dwh_db_host: "localhost"
+ovirt_engine_dwh_db_name: "ovirt_engine_history"
+ovirt_engine_dwh_db_user: "ovirt_engine_history"
+ovirt_engine_dwh_db_password: "unix"
+
+# Storage configuration
+# Set ovirt_storage_type to: "lun" (Direct LUN) or "none" (skip storage setup)
+ovirt_storage_type: "lun"
+
+# Direct LUN Storage (when ovirt_storage_type: "lun")
+# Get LUN ID from: multipath -ll
+ovirt_lun_id: "3600062b202f02e0030cd23b26925a504"
+ovirt_lun_storage_name: "data_lun"
+
+# Local Storage Directories (on /home partition)
+# NFS ISO Domain - for VM installation ISOs
+ovirt_iso_domain_enabled: true
+ovirt_iso_domain_path: "/home/iso"
+ovirt_iso_domain_name: "iso_local"
+
+
+# Chrony NTP servers
+ntp_servers:
+  - "0.pool.ntp.org"
+  - "1.pool.ntp.org"
+  - "2.pool.ntp.org"
+  - "3.pool.ntp.org"
+
+# Data center and cluster names
+ovirt_datacenter_name: "Default"
+ovirt_cluster_name: "Default"
+
+# Host configuration
+ovirt_host_name: "{{ ansible_hostname }}"
+ovirt_host_address: "{{ ansible_default_ipv4.address }}"

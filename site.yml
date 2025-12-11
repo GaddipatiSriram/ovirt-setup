@@ -1,0 +1,12 @@
+---
+# site.yml - Master playbook for oVirt Engine deployment
+# Run: ansible-playbook -i inventory.ini site.yml
+
+- name: Import prep_host playbook
+  ansible.builtin.import_playbook: prep_host.yml
+
+- name: Import install_engine playbook
+  ansible.builtin.import_playbook: install_engine.yml
+
+- name: Import post_install playbook
+  ansible.builtin.import_playbook: post_install.yml
