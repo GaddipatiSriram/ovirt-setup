@@ -30,10 +30,10 @@ ovirt_lun_id: "3600062b202f02e0030cd23b26925a504"
 ovirt_lun_storage_name: "data_lun"
 
 # Local Storage Directories (on /home partition)
-# NFS ISO Domain - for VM installation ISOs
-ovirt_iso_domain_enabled: true
-ovirt_iso_domain_path: "/home/iso"
-ovirt_iso_domain_name: "iso_local"
+# NFS Export/Backup Domain - for VM export/import and backups
+ovirt_export_domain_enabled: true
+ovirt_export_domain_path: "/home/iso"
+ovirt_export_domain_name: "backup_export"
 
 
 # Chrony NTP servers

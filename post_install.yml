@@ -126,33 +126,33 @@
         msg: "Storage setup skipped (ovirt_storage_type={{ ovirt_storage_type | default('none') }}). Add storage manually via Admin Portal."
       when: ovirt_storage_type | default('none') == 'none'
 
-    # Add NFS ISO storage domain
-    - name: Add NFS ISO storage domain
+    # Add NFS Export/Backup storage domain
+    - name: Add NFS Export/Backup storage domain
       ovirt.ovirt.ovirt_storage_domain:
         auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
-        name: "{{ ovirt_iso_domain_name }}"
+        name: "{{ ovirt_export_domain_name }}"
         host: "{{ ovirt_host_name }}"
         data_center: "{{ ovirt_datacenter_name }}"
-        domain_function: iso
+        domain_function: export
         nfs:
           address: "{{ ovirt_host_address }}"
-          path: "{{ ovirt_iso_domain_path }}"
+          path: "{{ ovirt_export_domain_path }}"
           version: "v4_1"
         state: present
       when:
-        - ovirt_iso_domain_enabled | default(false)
+        - ovirt_export_domain_enabled | default(false)
         - host_info.ovirt_hosts is defined
         - host_info.ovirt_hosts | length > 0
         - host_info.ovirt_hosts[0].status == 'up'
-      register: iso_storage_result
+      register: export_storage_result
       ignore_errors: true
 
-    - name: Display ISO domain result
+    - name: Display Export domain result
       ansible.builtin.debug:
-        msg: "ISO domain '{{ ovirt_iso_domain_name }}' added: {{ iso_storage_result.changed | default(false) }}"
+        msg: "Export domain '{{ ovirt_export_domain_name }}' added: {{ export_storage_result.changed | default(false) }}"
       when:
-        - ovirt_iso_domain_enabled | default(false)
-        - iso_storage_result is defined
+        - ovirt_export_domain_enabled | default(false)
+        - export_storage_result is defined
 
     # Revoke SSO token
     - name: Revoke SSO token
@@ -229,8 +229,8 @@
           - "Host: {{ ovirt_host_name }}"
           - "=============================================="
           - "Storage Domains:"
-          - "  Data: {{ ovirt_lun_storage_name }} (Direct LUN)"
-          - "  ISO:  {{ ovirt_iso_domain_name }} ({{ ovirt_iso_domain_path }})"
+          - "  Data:   {{ ovirt_lun_storage_name }} (Direct LUN)"
+          - "  Export: {{ ovirt_export_domain_name }} ({{ ovirt_export_domain_path }})"
           - "=============================================="
           - ""
           - "*** MANUAL REBOOT REQUIRED ***"

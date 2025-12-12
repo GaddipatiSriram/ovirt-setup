@@ -1,0 +1,197 @@
+---
+# configure_pfsense_nics.yml - Add vNICs to pfSense VM for all VLAN networks
+# Run: ansible-playbook -i inventory.ini configure_pfsense_nics.yml
+#
+# This attaches vNICs to pfSense for routing between all VLAN networks.
+# Each vNIC connects to a VLAN network - oVirt handles the tagging.
+# VM will be stopped if needed to add NICs beyond hot-plug limit.
+
+- name: Configure pfSense VM Network Interfaces
+  hosts: engine
+  become: true
+  gather_facts: false
+
+  vars:
+    vm_name: "pfSense"
+
+    # All networks pfSense needs to route
+    pfsense_networks:
+      # WAN/Management
+      - name: "ovirtmgmt"
+        nic_name: "nic1"
+        description: "WAN - Management network"
+
+      # Management VLANs (10-16)
+      - name: "Mgmt-Core-Net"
+        nic_name: "nic2"
+        description: "VLAN 10 - Core management"
+
+      - name: "Mgmt-DMZ-Net"
+        nic_name: "nic3"
+        description: "VLAN 11 - Mgmt DMZ"
+
+      - name: "Mgmt-Observability-Net"
+        nic_name: "nic4"
+        description: "VLAN 12 - Observability"
+
+      - name: "Mgmt-DevOps-Net"
+        nic_name: "nic5"
+        description: "VLAN 13 - DevOps"
+
+      - name: "Mgmt-Identity-Net"
+        nic_name: "nic6"
+        description: "VLAN 14 - Identity"
+
+      - name: "Mgmt-Security-Net"
+        nic_name: "nic7"
+        description: "VLAN 15 - Security"
+
+      - name: "Mgmt-Backup-Net"
+        nic_name: "nic8"
+        description: "VLAN 16 - Backup"
+
+      # Development VLANs (21-25)
+      - name: "Dev-DMZ-Net"
+        nic_name: "nic9"
+        description: "VLAN 21 - Dev DMZ"
+
+      - name: "Dev-Web-Net"
+        nic_name: "nic10"
+        description: "VLAN 22 - Dev Web"
+
+      - name: "Dev-App-Net"
+        nic_name: "nic11"
+        description: "VLAN 23 - Dev App"
+
+      - name: "Dev-Database-Net"
+        nic_name: "nic12"
+        description: "VLAN 24 - Dev Database"
+
+      - name: "Dev-Messaging-Net"
+        nic_name: "nic13"
+        description: "VLAN 25 - Dev Messaging"
+
+      # Production VLANs (31-39)
+      - name: "Prod-DMZ-Net"
+        nic_name: "nic14"
+        description: "VLAN 31 - Prod DMZ"
+
+      - name: "Prod-Web-Net"
+        nic_name: "nic15"
+        description: "VLAN 32 - Prod Web"
+
+      - name: "Prod-App-Net"
+        nic_name: "nic16"
+        description: "VLAN 33 - Prod App"
+
+      - name: "Prod-Database-Net"
+        nic_name: "nic17"
+        description: "VLAN 34 - Prod Database"
+
+      - name: "Prod-Messaging-Net"
+        nic_name: "nic18"
+        description: "VLAN 35 - Prod Messaging"
+
+      - name: "Prod-Cache-Net"
+        nic_name: "nic19"
+        description: "VLAN 36 - Prod Cache"
+
+      - name: "Prod-API-Net"
+        nic_name: "nic20"
+        description: "VLAN 37 - Prod API"
+
+      - name: "Prod-DR-Net"
+        nic_name: "nic21"
+        description: "VLAN 39 - Prod DR"
+
+  tasks:
+    - name: Obtain SSO token from oVirt Engine
+      ovirt.ovirt.ovirt_auth:
+        url: "https://{{ ovirt_engine_fqdn }}/ovirt-engine/api"
+        username: "admin@ovirt@internalsso"
+        password: "{{ ovirt_engine_admin_password }}"
+        insecure: true
+      register: ovirt_auth
+
+    - name: Get VM info
+      ovirt.ovirt.ovirt_vm_info:
+        auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+        pattern: "name={{ vm_name }}"
+      register: vm_info
+
+    - name: Stop VM if running (needed to add all NICs)
+      ovirt.ovirt.ovirt_vm:
+        auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+        name: "{{ vm_name }}"
+        state: stopped
+        force: true
+        wait: true
+        timeout: 120
+      when: vm_info.ovirt_vms[0].status in ['up', 'powering_down']
+
+    - name: Add vNICs to pfSense VM
+      ovirt.ovirt.ovirt_nic:
+        auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+        vm: "{{ vm_name }}"
+        name: "{{ item.nic_name }}"
+        profile: "{{ item.name }}"
+        network: "{{ item.name }}"
+        interface: virtio
+        state: present
+      loop: "{{ pfsense_networks }}"
+      loop_control:
+        label: "{{ item.nic_name }} -> {{ item.name }}"
+
+    - name: Start VM
+      ovirt.ovirt.ovirt_vm:
+        auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+        name: "{{ vm_name }}"
+        state: running
+        wait: true
+
+    - name: Revoke SSO token
+      ovirt.ovirt.ovirt_auth:
+        state: absent
+        ovirt_auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+
+    - name: Display summary
+      ansible.builtin.debug:
+        msg:
+          - "=============================================="
+          - "pfSense vNICs configured!"
+          - "=============================================="
+          - ""
+          - "WAN Interface:"
+          - "  nic1  -> ovirtmgmt (Management/WAN)"
+          - ""
+          - "Management VLANs (10-16):"
+          - "  nic2  -> Mgmt-Core-Net        (VLAN 10)"
+          - "  nic3  -> Mgmt-DMZ-Net         (VLAN 11)"
+          - "  nic4  -> Mgmt-Observability   (VLAN 12)"
+          - "  nic5  -> Mgmt-DevOps-Net      (VLAN 13)"
+          - "  nic6  -> Mgmt-Identity-Net    (VLAN 14)"
+          - "  nic7  -> Mgmt-Security-Net    (VLAN 15)"
+          - "  nic8  -> Mgmt-Backup-Net      (VLAN 16)"
+          - ""
+          - "Development VLANs (21-25):"
+          - "  nic9  -> Dev-DMZ-Net          (VLAN 21)"
+          - "  nic10 -> Dev-Web-Net          (VLAN 22)"
+          - "  nic11 -> Dev-App-Net          (VLAN 23)"
+          - "  nic12 -> Dev-Database-Net     (VLAN 24)"
+          - "  nic13 -> Dev-Messaging-Net    (VLAN 25)"
+          - ""
+          - "Production VLANs (31-39):"
+          - "  nic14 -> Prod-DMZ-Net         (VLAN 31)"
+          - "  nic15 -> Prod-Web-Net         (VLAN 32)"
+          - "  nic16 -> Prod-App-Net         (VLAN 33)"
+          - "  nic17 -> Prod-Database-Net    (VLAN 34)"
+          - "  nic18 -> Prod-Messaging-Net   (VLAN 35)"
+          - "  nic19 -> Prod-Cache-Net       (VLAN 36)"
+          - "  nic20 -> Prod-API-Net         (VLAN 37)"
+          - "  nic21 -> Prod-DR-Net          (VLAN 39)"
+          - ""
+          - "=============================================="
+          - "Total: 21 vNICs (1 WAN + 20 VLAN interfaces)"
+          - ""
+          - "Next: Configure IPs in pfSense for each interface"
+          - "=============================================="

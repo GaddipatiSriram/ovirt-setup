@@ -1,0 +1,246 @@
+---
+# create_networks.yml - Create VLAN networks and attach to host
+# Run: ansible-playbook -i inventory.ini create_networks.yml
+#
+# This playbook does everything:
+#   1. Creates VLAN networks in datacenter
+#   2. Assigns networks to Default cluster (required=false)
+#   3. Attaches networks to host NIC (creates VLAN interfaces)
+#
+# Network Architecture:
+#   - Management: VLAN 10-16 (10.10.0.0/24 - 10.10.6.0/24)
+#   - Development: VLAN 21-25 (10.20.1.0/24 - 10.20.5.0/24)
+#   - Production:  VLAN 31-39 (10.30.1.0/24 - 10.30.9.0/24)
+
+- name: Create VLAN Networks (Single-Host Setup)
+  hosts: engine
+  become: true
+  gather_facts: true
+
+  vars:
+    datacenter_name: "Default"
+    cluster_name: "Default"
+    host_name: "node"
+    nic_name: "eno1"
+
+    # All VLAN networks
+    vlan_networks:
+      # Management networks (VLAN 10-16)
+      - name: "Mgmt-Core-Net"
+        vlan_id: 10
+        subnet: "10.10.0.0/24"
+        gateway: "10.10.0.1"
+        description: "Core management - pfSense, CoreDNS, NTP"
+
+      - name: "Mgmt-DMZ-Net"
+        vlan_id: 11
+        subnet: "10.10.1.0/24"
+        gateway: "10.10.1.1"
+        description: "Mgmt DMZ - Bastion, VPN Gateway"
+
+      - name: "Mgmt-Observability-Net"
+        vlan_id: 12
+        subnet: "10.10.2.0/24"
+        gateway: "10.10.2.1"
+        description: "Observability - Grafana, Prometheus, ELK"
+
+      - name: "Mgmt-DevOps-Net"
+        vlan_id: 13
+        subnet: "10.10.3.0/24"
+        gateway: "10.10.3.1"
+        description: "DevOps - ArgoCD, Jenkins"
+
+      - name: "Mgmt-Identity-Net"
+        vlan_id: 14
+        subnet: "10.10.4.0/24"
+        gateway: "10.10.4.1"
+        description: "Identity - LDAP, Keycloak"
+
+      - name: "Mgmt-Security-Net"
+        vlan_id: 15
+        subnet: "10.10.5.0/24"
+        gateway: "10.10.5.1"
+        description: "Security - IDS/IPS, SIEM"
+
+      - name: "Mgmt-Backup-Net"
+        vlan_id: 16
+        subnet: "10.10.6.0/24"
+        gateway: "10.10.6.1"
+        description: "Backup - Veeam, Restic"
+
+      # Development networks (VLAN 21-25)
+      - name: "Dev-DMZ-Net"
+        vlan_id: 21
+        subnet: "10.20.1.0/24"
+        gateway: "10.20.1.1"
+        description: "Dev DMZ - Load Balancer, Reverse Proxy"
+
+      - name: "Dev-Web-Net"
+        vlan_id: 22
+        subnet: "10.20.2.0/24"
+        gateway: "10.20.2.1"
+        description: "Dev Web - Nginx, Apache"
+
+      - name: "Dev-App-Net"
+        vlan_id: 23
+        subnet: "10.20.3.0/24"
+        gateway: "10.20.3.1"
+        description: "Dev App - Node.js, Java"
+
+      - name: "Dev-Database-Net"
+        vlan_id: 24
+        subnet: "10.20.4.0/24"
+        gateway: "10.20.4.1"
+        description: "Dev Database - PostgreSQL, MySQL"
+
+      - name: "Dev-Messaging-Net"
+        vlan_id: 25
+        subnet: "10.20.5.0/24"
+        gateway: "10.20.5.1"
+        description: "Dev Messaging - Kafka, RabbitMQ"
+
+      # Production networks (VLAN 31-39)
+      - name: "Prod-DMZ-Net"
+        vlan_id: 31
+        subnet: "10.30.1.0/24"
+        gateway: "10.30.1.1"
+        description: "Prod DMZ - LB, WAF, Proxy"
+
+      - name: "Prod-Web-Net"
+        vlan_id: 32
+        subnet: "10.30.2.0/24"
+        gateway: "10.30.2.1"
+        description: "Prod Web - Nginx, Apache"
+
+      - name: "Prod-App-Net"
+        vlan_id: 33
+        subnet: "10.30.3.0/24"
+        gateway: "10.30.3.1"
+        description: "Prod App - Node.js, Java"
+
+      - name: "Prod-Database-Net"
+        vlan_id: 34
+        subnet: "10.30.4.0/24"
+        gateway: "10.30.4.1"
+        description: "Prod Database - PostgreSQL, MySQL"
+
+      - name: "Prod-Messaging-Net"
+        vlan_id: 35
+        subnet: "10.30.5.0/24"
+        gateway: "10.30.5.1"
+        description: "Prod Messaging - Kafka, RabbitMQ"
+
+      - name: "Prod-Cache-Net"
+        vlan_id: 36
+        subnet: "10.30.6.0/24"
+        gateway: "10.30.6.1"
+        description: "Prod Cache - Redis, Memcached"
+
+      - name: "Prod-API-Net"
+        vlan_id: 37
+        subnet: "10.30.7.0/24"
+        gateway: "10.30.7.1"
+        description: "Prod API - API Gateway, Service Mesh"
+
+      - name: "Prod-DR-Net"
+        vlan_id: 39
+        subnet: "10.30.9.0/24"
+        gateway: "10.30.9.1"
+        description: "Prod DR - Disaster Recovery"
+
+  tasks:
+    - name: Obtain SSO token from oVirt Engine
+      ovirt.ovirt.ovirt_auth:
+        url: "https://{{ ovirt_engine_fqdn }}/ovirt-engine/api"
+        username: "admin@ovirt@internalsso"
+        password: "{{ ovirt_engine_admin_password }}"
+        insecure: true
+      register: ovirt_auth
+
+    # ==================== STEP 1: CREATE VLAN NETWORKS ====================
+    - name: Create VLAN networks in datacenter
+      ovirt.ovirt.ovirt_network:
+        auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+        name: "{{ item.name }}"
+        data_center: "{{ datacenter_name }}"
+        description: "{{ item.description }} ({{ item.subnet }}) - GW: {{ item.gateway }}"
+        vlan_tag: "{{ item.vlan_id }}"
+        vm_network: true
+        mtu: 1500
+        state: present
+      loop: "{{ vlan_networks }}"
+      loop_control:
+        label: "{{ item.name }} (VLAN {{ item.vlan_id }})"
+
+    # ==================== STEP 2: ASSIGN TO DEFAULT CLUSTER ====================
+    - name: Assign networks to Default cluster (required=false)
+      ovirt.ovirt.ovirt_network:
+        auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+        name: "{{ item.name }}"
+        data_center: "{{ datacenter_name }}"
+        clusters:
+          - name: "{{ cluster_name }}"
+            assigned: true
+            required: false
+            migration: false
+            display: false
+        state: present
+      loop: "{{ vlan_networks }}"
+      loop_control:
+        label: "{{ item.name }} -> {{ cluster_name }}"
+
+    # ==================== STEP 3: ATTACH TO HOST NIC ====================
+    - name: Attach VLAN networks to host NIC
+      ovirt.ovirt.ovirt_host_network:
+        auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+        name: "{{ host_name }}"
+        interface: "{{ nic_name }}"
+        networks:
+          - name: "{{ item.name }}"
+        save: true
+      loop: "{{ vlan_networks }}"
+      loop_control:
+        label: "{{ item.name }} -> {{ nic_name }}.{{ item.vlan_id }}"
+
+    # ==================== CLEANUP ====================
+    - name: Revoke SSO token
+      ovirt.ovirt.ovirt_auth:
+        state: absent
+        ovirt_auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+
+    - name: Display summary
+      ansible.builtin.debug:
+        msg:
+          - "=============================================="
+          - "VLAN Networks Setup Complete"
+          - "=============================================="
+          - ""
+          - "MANAGEMENT (VLAN 10-16):"
+          - "  {{ nic_name }}.10  Mgmt-Core-Net        10.10.0.0/24"
+          - "  {{ nic_name }}.11  Mgmt-DMZ-Net         10.10.1.0/24"
+          - "  {{ nic_name }}.12  Mgmt-Observability   10.10.2.0/24"
+          - "  {{ nic_name }}.13  Mgmt-DevOps-Net      10.10.3.0/24"
+          - "  {{ nic_name }}.14  Mgmt-Identity-Net    10.10.4.0/24"
+          - "  {{ nic_name }}.15  Mgmt-Security-Net    10.10.5.0/24"
+          - "  {{ nic_name }}.16  Mgmt-Backup-Net      10.10.6.0/24"
+          - ""
+          - "DEVELOPMENT (VLAN 21-25):"
+          - "  {{ nic_name }}.21  Dev-DMZ-Net          10.20.1.0/24"
+          - "  {{ nic_name }}.22  Dev-Web-Net          10.20.2.0/24"
+          - "  {{ nic_name }}.23  Dev-App-Net          10.20.3.0/24"
+          - "  {{ nic_name }}.24  Dev-Database-Net     10.20.4.0/24"
+          - "  {{ nic_name }}.25  Dev-Messaging-Net    10.20.5.0/24"
+          - ""
+          - "PRODUCTION (VLAN 31-39):"
+          - "  {{ nic_name }}.31  Prod-DMZ-Net         10.30.1.0/24"
+          - "  {{ nic_name }}.32  Prod-Web-Net         10.30.2.0/24"
+          - "  {{ nic_name }}.33  Prod-App-Net         10.30.3.0/24"
+          - "  {{ nic_name }}.34  Prod-Database-Net    10.30.4.0/24"
+          - "  {{ nic_name }}.35  Prod-Messaging-Net   10.30.5.0/24"
+          - "  {{ nic_name }}.36  Prod-Cache-Net       10.30.6.0/24"
+          - "  {{ nic_name }}.37  Prod-API-Net         10.30.7.0/24"
+          - "  {{ nic_name }}.39  Prod-DR-Net          10.30.9.0/24"
+          - ""
+          - "=============================================="
+          - "Total: 20 VLAN networks ready for VMs"
+          - "=============================================="

@@ -1,0 +1,97 @@
+---
+# download_pfsense.yml - Download pfSense ISO and upload to oVirt as disk
+# Run: ansible-playbook -i inventory.ini download_pfsense.yml
+#
+# This downloads the latest pfSense CE ISO and uploads it to data_lun
+# as a disk that can be attached to VMs for installation.
+
+- name: Download pfSense ISO to oVirt
+  hosts: engine
+  become: true
+  gather_facts: false
+
+  vars:
+    pfsense_version: "2.7.2"
+    pfsense_iso_name: "pfSense-CE-{{ pfsense_version }}-RELEASE-amd64.iso"
+    pfsense_url: "https://atxfiles.netgate.com/mirror/downloads/pfSense-CE-{{ pfsense_version }}-RELEASE-amd64.iso.gz"
+    download_dir: "/tmp"
+    storage_domain: "data_lun"
+
+  tasks:
+    - name: Install required packages
+      ansible.builtin.dnf:
+        name:
+          - gzip
+          - python3-ovirt-engine-sdk4
+        state: present
+
+    - name: Download pfSense ISO (compressed)
+      ansible.builtin.get_url:
+        url: "{{ pfsense_url }}"
+        dest: "{{ download_dir }}/{{ pfsense_iso_name }}.gz"
+        mode: '0644'
+        timeout: 600
+      register: download_result
+
+    - name: Decompress pfSense ISO
+      ansible.builtin.command:
+        cmd: "gunzip -f {{ download_dir }}/{{ pfsense_iso_name }}.gz"
+        creates: "{{ download_dir }}/{{ pfsense_iso_name }}"
+      when: download_result.changed or not (download_dir ~ '/' ~ pfsense_iso_name) is file
+
+    - name: Get ISO file size
+      ansible.builtin.stat:
+        path: "{{ download_dir }}/{{ pfsense_iso_name }}"
+      register: iso_stat
+
+    - name: Display ISO info
+      ansible.builtin.debug:
+        msg: "Downloaded {{ pfsense_iso_name }} ({{ (iso_stat.stat.size / 1024 / 1024) | round(1) }} MB)"
+
+    - name: Obtain SSO token from oVirt Engine
+      ovirt.ovirt.ovirt_auth:
+        url: "https://{{ ovirt_engine_fqdn }}/ovirt-engine/api"
+        username: "admin@ovirt@internalsso"
+        password: "{{ ovirt_engine_admin_password }}"
+        insecure: true
+      register: ovirt_auth
+
+    - name: Upload pfSense ISO as disk to oVirt
+      ovirt.ovirt.ovirt_disk:
+        auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+        name: "{{ pfsense_iso_name }}"
+        description: "pfSense CE {{ pfsense_version }} installation ISO"
+        storage_domain: "{{ storage_domain }}"
+        upload_image_path: "{{ download_dir }}/{{ pfsense_iso_name }}"
+        size: "{{ iso_stat.stat.size }}"
+        format: raw
+        content_type: iso
+        bootable: true
+        sparse: false
+        wait: true
+        timeout: 600
+      register: upload_result
+
+    - name: Revoke SSO token
+      ovirt.ovirt.ovirt_auth:
+        state: absent
+        ovirt_auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+
+    - name: Clean up downloaded ISO
+      ansible.builtin.file:
+        path: "{{ download_dir }}/{{ pfsense_iso_name }}"
+        state: absent
+      when: upload_result is succeeded
+
+    - name: Display result
+      ansible.builtin.debug:
+        msg:
+          - "=============================================="
+          - "pfSense ISO uploaded successfully!"
+          - "=============================================="
+          - "Disk name: {{ pfsense_iso_name }}"
+          - "Storage domain: {{ storage_domain }}"
+          - "Size: {{ (iso_stat.stat.size / 1024 / 1024) | round(1) }} MB"
+          - ""
+          - "To use: Attach this disk as CD-ROM when creating a VM"
+          - "=============================================="
