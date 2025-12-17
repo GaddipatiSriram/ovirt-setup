@@ -1,17 +1,8 @@
 ---
-# configure_pfsense_vm.yml - Download ISO, create and configure pfSense VM
-# Run: ansible-playbook -i inventory.ini network/configure_pfsense_vm.yml
-#
-# Simplified Architecture (8 interfaces):
-#   - WAN (ovirtmgmt)
-#   - 3 Management networks (VLAN 10-12)
-#   - 2 Development networks (VLAN 20-21)
-#   - 2 Production networks (VLAN 30-31)
-#
-# Post-installation (after pfSense is installed from ISO):
-#   ansible-playbook -i inventory.ini network/configure_pfsense_vm.yml --tags post_install_pfsense
+# install_pfsense.yml - Download ISO, create and configure pfSense VM
+# Run: ansible-playbook playbooks/network/install_pfsense.yml
 
-- name: Configure pfSense VM
+- name: Install pfSense VM
   hosts: engine
   become: true
   gather_facts: false
@@ -36,16 +27,14 @@
     pfsense_wan_ip: "192.168.0.101"
     pfsense_wan_gateway: "192.168.0.1"
 
-    # Simplified networks for pfSense (8 interfaces total)
+    # Networks for pfSense (8 interfaces total)
     pfsense_networks:
-      # WAN (static MAC for consistent DHCP reservation)
       - name: "ovirtmgmt"
         nic_name: "nic1"
         pfsense_name: "WAN"
         mac_address: "{{ pfsense_wan_mac }}"
         ip_address: "{{ pfsense_wan_ip }}"
 
-      # Management networks (VLAN 10-12)
       - name: "Mgmt-Core-Net"
         nic_name: "nic2"
         pfsense_name: "MGMT_CORE"
@@ -61,7 +50,6 @@
         pfsense_name: "MGMT_OBSERV"
         ip_address: "10.10.2.1"
 
-      # Development networks (VLAN 20-21)
       - name: "Dev-Apps-Net"
         nic_name: "nic5"
         pfsense_name: "DEV_APPS"
@@ -72,7 +60,6 @@
         pfsense_name: "DEV_DATA"
         ip_address: "10.20.1.1"
 
-      # Production networks (VLAN 30-31)
       - name: "Prod-Apps-Net"
         nic_name: "nic7"
         pfsense_name: "PROD_APPS"
@@ -84,8 +71,7 @@
         ip_address: "10.30.1.1"
 
   tasks:
-    # ==================== DOWNLOAD ISO ====================
-    - name: Check if pfSense ISO already exists in oVirt
+    - name: Authenticate to oVirt
       ovirt.ovirt.ovirt_auth:
         url: "https://{{ ovirt_engine_fqdn }}/ovirt-engine/api"
         username: "admin@ovirt@internalsso"
@@ -115,7 +101,6 @@
             dest: "{{ download_dir }}/{{ iso_name }}.gz"
             mode: '0644'
             timeout: 600
-          register: download_result
 
         - name: Decompress pfSense ISO
           ansible.builtin.command:
@@ -131,7 +116,7 @@
           ansible.builtin.debug:
             msg: "Downloaded {{ iso_name }} ({{ (iso_stat.stat.size / 1024 / 1024) | round(1) }} MB)"
 
-        - name: Upload pfSense ISO as disk to oVirt
+        - name: Upload pfSense ISO to oVirt
           ovirt.ovirt.ovirt_disk:
             auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
             name: "{{ iso_name }}"
@@ -156,7 +141,6 @@
         msg: "pfSense ISO already exists in oVirt, skipping download"
       when: iso_check.ovirt_disks | length > 0
 
-    # ==================== CREATE VM ====================
     - name: Create pfSense VM
       ovirt.ovirt.ovirt_vm:
         auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
@@ -176,11 +160,10 @@
         state: present
       register: vm_result
 
-    # ==================== CREATE DISK ====================
     - name: Create pfSense disk
       ovirt.ovirt.ovirt_disk:
         auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
-        name: "{{ vm_name }}_Disk1"
+        name: "{{ vm_name }}_Disk"
         vm_name: "{{ vm_name }}"
         size: "{{ vm_disk_size }}"
         format: cow
@@ -190,7 +173,6 @@
         state: present
       when: vm_result.changed
 
-    # ==================== ADD vNICs ====================
     - name: Add vNICs to pfSense VM
       ovirt.ovirt.ovirt_nic:
         auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
@@ -205,8 +187,7 @@
       loop_control:
         label: "{{ item.nic_name }} -> {{ item.name }} ({{ item.pfsense_name }})"
 
-    # ==================== ATTACH ISO AND SET BOOT ORDER ====================
-    - name: Attach pfSense ISO and set boot order
+    - name: Attach pfSense ISO and start VM
       ovirt.ovirt.ovirt_vm:
         auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
         name: "{{ vm_name }}"
@@ -216,7 +197,6 @@
           - hd
         state: running
 
-    # ==================== CLEANUP ====================
     - name: Revoke SSO token
       ovirt.ovirt.ovirt_auth:
         state: absent
@@ -226,7 +206,7 @@
       ansible.builtin.debug:
         msg:
           - "=============================================="
-          - "pfSense VM Configuration Complete (Simplified)"
+          - "pfSense VM Created - Ready for Installation"
           - "=============================================="
           - ""
           - "VM Settings:"
@@ -247,129 +227,7 @@
           - ""
           - "=============================================="
           - "Next Steps:"
-          - "  1. Open noVNC console"
+          - "  1. Open noVNC console in oVirt Admin Portal"
           - "  2. Install pfSense from ISO"
-          - "  3. Run: ansible-playbook -i inventory.ini network/configure_pfsense_vm.yml --tags post_install_pfsense"
-          - "  4. Configure interfaces with IPs shown above"
-          - "  5. Create interface groups (MGMT_GROUP, DEV_GROUP, PROD_GROUP)"
-          - "  6. Enable DHCP on each interface"
-          - "  7. Set up firewall rules"
-          - "=============================================="
-
-# ==================== POST-INSTALLATION PLAY ====================
-- name: pfSense Post-Installation - Eject ISO and Configure Boot
-  hosts: engine
-  become: true
-  gather_facts: false
-  tags:
-    - post_install_pfsense
-    - never
-
-  vars:
-    vm_name: "pfSense"
-
-  tasks:
-    - name: Authenticate to oVirt
-      ovirt.ovirt.ovirt_auth:
-        url: "https://{{ ovirt_engine_fqdn }}/ovirt-engine/api"
-        username: "admin@ovirt@internalsso"
-        password: "{{ ovirt_engine_admin_password }}"
-        insecure: true
-      register: ovirt_auth
-
-    - name: Get VM info
-      ovirt.ovirt.ovirt_vm_info:
-        auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
-        pattern: "name={{ vm_name }}"
-      register: vm_info
-
-    - name: Stop pfSense VM if running
-      ovirt.ovirt.ovirt_vm:
-        auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
-        name: "{{ vm_name }}"
-        state: stopped
-        wait: true
-      when: vm_info.ovirt_vms[0].status == 'up'
-
-    - name: Eject ISO and set boot order to HD only
-      ovirt.ovirt.ovirt_vm:
-        auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
-        name: "{{ vm_name }}"
-        cd_iso: ""
-        boot_devices:
-          - hd
-        state: present
-
-    - name: Start pfSense VM
-      ovirt.ovirt.ovirt_vm:
-        auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
-        name: "{{ vm_name }}"
-        state: running
-        wait: true
-
-    - name: Wait for VM to fully boot
-      ansible.builtin.pause:
-        seconds: 30
-        prompt: "Waiting for pfSense to boot..."
-
-    - name: Ensure all vNICs are linked and plugged
-      ovirt.ovirt.ovirt_nic:
-        auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
-        vm: "{{ vm_name }}"
-        name: "nic{{ item }}"
-        linked: true
-        state: present
-      loop: "{{ range(1, 9) | list }}"
-      loop_control:
-        label: "nic{{ item }}"
-
-    - name: Hot-replug WAN NIC to force link detection
-      block:
-        - name: Unplug WAN NIC (nic1)
-          ovirt.ovirt.ovirt_nic:
-            auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
-            vm: "{{ vm_name }}"
-            name: "nic1"
-            linked: false
-            state: present
-
-        - name: Wait briefly
-          ansible.builtin.pause:
-            seconds: 2
-
-        - name: Plug WAN NIC back in
-          ovirt.ovirt.ovirt_nic:
-            auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
-            vm: "{{ vm_name }}"
-            name: "nic1"
-            linked: true
-            state: present
-
-    - name: Revoke SSO token
-      ovirt.ovirt.ovirt_auth:
-        state: absent
-        ovirt_auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
-
-    - name: Display post-install summary
-      ansible.builtin.debug:
-        msg:
-          - "=============================================="
-          - "pfSense Post-Installation Complete"
-          - "=============================================="
-          - ""
-          - "Completed:"
-          - "  - ISO ejected"
-          - "  - Boot order set to HD only"
-          - "  - VM started"
-          - "  - All 8 NICs linked and plugged"
-          - ""
-          - "Configure pfSense interfaces:"
-          - "  WAN (vtnet0):        192.168.0.101/24 GW: 192.168.0.1"
-          - "  MGMT_CORE (vtnet1):  10.10.0.1/24"
-          - "  MGMT_DEVOPS (vtnet2): 10.10.1.1/24"
-          - "  MGMT_OBSERV (vtnet3): 10.10.2.1/24"
-          - "  DEV_APPS (vtnet4):   10.20.0.1/24"
-          - "  DEV_DATA (vtnet5):   10.20.1.1/24"
-          - "  PROD_APPS (vtnet6):  10.30.0.1/24"
-          - "  PROD_DATA (vtnet7):  10.30.1.1/24"
+          - "  3. Run: ansible-playbook playbooks/network/post_install_pfsense.yml"
           - "=============================================="

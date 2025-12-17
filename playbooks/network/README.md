@@ -7,7 +7,8 @@ Playbooks for creating VLAN networks and deploying pfSense firewall VM.
 | Playbook | Description |
 |----------|-------------|
 | `create_networks.yml` | Create VLAN networks in oVirt |
-| `configure_pfsense_vm.yml` | Deploy and configure pfSense VM |
+| `install_pfsense.yml` | Create pfSense VM and boot from ISO |
+| `post_install_pfsense.yml` | Eject ISO, set boot to HD, configure NICs |
 
 ## Usage
 
@@ -15,11 +16,13 @@ Playbooks for creating VLAN networks and deploying pfSense firewall VM.
 # 1. Create VLAN networks
 ansible-playbook playbooks/network/create_networks.yml
 
-# 2. Deploy pfSense VM
-ansible-playbook playbooks/network/configure_pfsense_vm.yml
+# 2. Create pfSense VM (boots from ISO for installation)
+ansible-playbook playbooks/network/install_pfsense.yml
 
-# 3. After pfSense installation from ISO, run post-install
-ansible-playbook playbooks/network/configure_pfsense_vm.yml --tags post_install_pfsense
+# 3. Open noVNC console and install pfSense from ISO
+
+# 4. After installation completes, run post-install
+ansible-playbook playbooks/network/post_install_pfsense.yml
 ```
 
 ## Network Architecture
@@ -71,30 +74,73 @@ Creates 7 VLAN networks in oVirt:
 2. Assigns networks to Default cluster
 3. Attaches networks to host NIC (eno1)
 
-### configure_pfsense_vm.yml
+### install_pfsense.yml
 
-Deploys pfSense firewall VM:
+Creates pfSense firewall VM:
 
 1. Downloads pfSense ISO (if not exists)
 2. Creates VM with 4GB RAM, 2 CPU, 50GB disk
 3. Adds 8 vNICs (WAN + 7 internal networks)
-4. Attaches ISO and boots for installation
+4. Attaches ISO and boots VM for installation
 
-**Post-install tag:** Ejects ISO, sets boot order, ensures NICs are linked.
+### post_install_pfsense.yml
+
+Finalizes pfSense after ISO installation:
+
+1. Force stops VM (handles stuck reboot)
+2. Ejects ISO
+3. Sets boot order to HD only
+4. Starts VM
+5. Ensures all NICs are linked
+6. Hot-replugs WAN NIC for link detection
+
+## Troubleshooting
+
+### pfSense Stuck at Reboot
+
+If pfSense gets stuck in a reboot loop after installation, the `post_install_pfsense.yml` playbook handles this automatically by force-stopping the VM.
+
+If the playbook still times out, use oVirt Admin Portal:
+1. Force stop the VM
+2. Edit VM > Boot Options > Boot Sequence: Hard Disk only
+3. Edit VM > Boot Options > Attach CD: empty
+4. Start VM
+
+## Disable pfSense Firewall
+
+During initial setup, you may want to disable the firewall temporarily:
+
+### Via WebGUI
+1. Navigate to **System > Advanced > Firewall & NAT**
+2. Check **Disable Firewall**
+3. Click **Save**
+
+### Via Console
+```bash
+# Temporarily disable (until reboot)
+pfctl -d
+
+# Re-enable
+pfctl -e
+```
+
+### Via Console Menu
+1. Select option **8** (Shell)
+2. Run: `pfctl -d`
+
+**Note:** Re-enable the firewall after configuration with `pfctl -e`
 
 ## Manual pfSense Configuration
 
-After VM deployment:
+After running post_install_pfsense.yml:
 
 1. Open noVNC console in oVirt
-2. Install pfSense from ISO
-3. Run post-install playbook
-4. Configure interfaces with IPs above
-5. Create interface groups:
+2. Configure interfaces with IPs above
+3. Create interface groups:
    - MGMT_GROUP: MGMT_CORE, MGMT_DEVOPS, MGMT_OBSERV
    - DEV_GROUP: DEV_APPS, DEV_DATA
    - PROD_GROUP: PROD_APPS, PROD_DATA
-6. Enable DHCP on each interface
-7. Configure firewall rules
+4. Enable DHCP on each interface
+5. Configure firewall rules
 
 See [docs/network-architecture.md](../../docs/network-architecture.md) for detailed firewall rules.

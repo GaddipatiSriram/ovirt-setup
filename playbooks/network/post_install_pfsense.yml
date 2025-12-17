@@ -1,0 +1,163 @@
+---
+# post_install_pfsense.yml - Eject ISO, set boot order, configure NICs
+# Run after pfSense installation from ISO completes
+# Run: ansible-playbook playbooks/network/post_install_pfsense.yml
+
+- name: pfSense Post-Installation
+  hosts: engine
+  become: true
+  gather_facts: false
+
+  vars:
+    vm_name: "pfSense"
+    # Timeout for VM stop (seconds) - increase if VM is slow to shutdown
+    stop_timeout: 120
+
+  tasks:
+    - name: Authenticate to oVirt
+      ovirt.ovirt.ovirt_auth:
+        url: "https://{{ ovirt_engine_fqdn }}/ovirt-engine/api"
+        username: "admin@ovirt@internalsso"
+        password: "{{ ovirt_engine_admin_password }}"
+        insecure: true
+      register: ovirt_auth
+
+    - name: Get VM info
+      ovirt.ovirt.ovirt_vm_info:
+        auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+        pattern: "name={{ vm_name }}"
+      register: vm_info
+
+    - name: Fail if VM not found
+      ansible.builtin.fail:
+        msg: "VM '{{ vm_name }}' not found"
+      when: vm_info.ovirt_vms | length == 0
+
+    - name: Force stop pfSense VM (using Python SDK for reliability)
+      ansible.builtin.script:
+        cmd: |
+          python3 << 'EOF'
+          import ovirtsdk4 as sdk
+          import ovirtsdk4.types as types
+          import time
+          import sys
+
+          conn = sdk.Connection(
+              url='https://{{ ovirt_engine_fqdn }}/ovirt-engine/api',
+              username='admin@ovirt@internalsso',
+              password='{{ ovirt_engine_admin_password }}',
+              insecure=True,
+          )
+
+          vms_service = conn.system_service().vms_service()
+          for vm in vms_service.list():
+              if vm.name == '{{ vm_name }}':
+                  vm_service = vms_service.vm_service(vm.id)
+                  if vm.status != types.VmStatus.DOWN:
+                      print(f"Stopping VM (status: {vm.status})...")
+                      try:
+                          vm_service.stop()
+                      except:
+                          pass
+                      for i in range({{ stop_timeout // 3 }}):
+                          time.sleep(3)
+                          vm = vm_service.get()
+                          if vm.status == types.VmStatus.DOWN:
+                              break
+                      print(f"VM stopped (status: {vm_service.get().status})")
+                  else:
+                      print("VM already stopped")
+          conn.close()
+          EOF
+      args:
+        executable: /bin/bash
+      register: stop_result
+      changed_when: "'Stopping' in stop_result.stdout"
+
+    - name: Display stop result
+      ansible.builtin.debug:
+        var: stop_result.stdout_lines
+
+    - name: Eject ISO and set boot order to HD only
+      ovirt.ovirt.ovirt_vm:
+        auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+        name: "{{ vm_name }}"
+        cd_iso: ""
+        boot_devices:
+          - hd
+        state: present
+
+    - name: Start pfSense VM
+      ovirt.ovirt.ovirt_vm:
+        auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+        name: "{{ vm_name }}"
+        state: running
+        wait: true
+        timeout: 120
+
+    - name: Wait for VM to boot
+      ansible.builtin.pause:
+        seconds: 30
+        prompt: "Waiting for pfSense to boot..."
+
+    - name: Ensure all vNICs are linked
+      ovirt.ovirt.ovirt_nic:
+        auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+        vm: "{{ vm_name }}"
+        name: "nic{{ item }}"
+        linked: true
+        state: present
+      loop: "{{ range(1, 9) | list }}"
+      loop_control:
+        label: "nic{{ item }}"
+
+    - name: Hot-replug WAN NIC to force link detection
+      block:
+        - name: Unplug WAN NIC (nic1)
+          ovirt.ovirt.ovirt_nic:
+            auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+            vm: "{{ vm_name }}"
+            name: "nic1"
+            linked: false
+            state: present
+
+        - name: Wait briefly
+          ansible.builtin.pause:
+            seconds: 2
+
+        - name: Plug WAN NIC back in
+          ovirt.ovirt.ovirt_nic:
+            auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+            vm: "{{ vm_name }}"
+            name: "nic1"
+            linked: true
+            state: present
+
+    - name: Revoke SSO token
+      ovirt.ovirt.ovirt_auth:
+        state: absent
+        ovirt_auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+
+    - name: Display post-install summary
+      ansible.builtin.debug:
+        msg:
+          - "=============================================="
+          - "pfSense Post-Installation Complete"
+          - "=============================================="
+          - ""
+          - "Completed:"
+          - "  - ISO ejected"
+          - "  - Boot order set to HD only"
+          - "  - VM started"
+          - "  - All 8 NICs linked"
+          - ""
+          - "Configure pfSense interfaces:"
+          - "  WAN (vtnet0):        192.168.0.101/24 GW: 192.168.0.1"
+          - "  MGMT_CORE (vtnet1):  10.10.0.1/24"
+          - "  MGMT_DEVOPS (vtnet2): 10.10.1.1/24"
+          - "  MGMT_OBSERV (vtnet3): 10.10.2.1/24"
+          - "  DEV_APPS (vtnet4):   10.20.0.1/24"
+          - "  DEV_DATA (vtnet5):   10.20.1.1/24"
+          - "  PROD_APPS (vtnet6):  10.30.0.1/24"
+          - "  PROD_DATA (vtnet7):  10.30.1.1/24"
+          - "=============================================="

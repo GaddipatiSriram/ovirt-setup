@@ -20,10 +20,10 @@
     template_description: "Fedora 41 template for Mgmt-Core-Net"
 
     # VM specs
-    vm_memory: 2GiB
-    vm_memory_guaranteed: 1GiB
+    vm_memory: 4GiB
+    vm_memory_guaranteed: 2GiB
     vm_cpu_sockets: 1
-    vm_cpu_cores: 2
+    vm_cpu_cores: 4
     vm_disk_size: 20GiB
 
     # Infrastructure
