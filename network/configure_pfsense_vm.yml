@@ -40,11 +40,19 @@
     pfsense_url: "https://atxfiles.netgate.com/mirror/downloads/pfSense-CE-{{ pfsense_version }}-RELEASE-amd64.iso.gz"
     download_dir: "/tmp"
 
+    # pfSense WAN static configuration
+    # MAC is set during deployment; IP must be configured in pfSense console
+    # (pfSense does not support cloud-init)
+    pfsense_wan_mac: "56:6f:1b:6a:00:77"
+    pfsense_wan_ip: "192.168.0.101"  # Configure manually in pfSense: WAN -> Static IP
+    pfsense_wan_gateway: "192.168.0.1"
+
     # All networks for pfSense routing
     pfsense_networks:
-      # WAN/Management
+      # WAN/Management (static MAC for consistent DHCP reservation)
       - name: "ovirtmgmt"
         nic_name: "nic1"
+        mac_address: "{{ pfsense_wan_mac }}"
 
       # Management VLANs (10-16)
       - name: "Mgmt-Core-Net"
@@ -208,6 +216,7 @@
         profile: "{{ item.name }}"
         network: "{{ item.name }}"
         interface: virtio
+        mac_address: "{{ item.mac_address | default(omit) }}"
         state: present
       loop: "{{ pfsense_networks }}"
       loop_control:
@@ -269,13 +278,19 @@
           - "  nic21 -> Prod-DR-Net      (VLAN 39 - 10.30.9.1)"
           - ""
           - "=============================================="
+          - "WAN Static Configuration:"
+          - "  MAC: {{ pfsense_wan_mac }}"
+          - "  IP:  {{ pfsense_wan_ip }}/24"
+          - "  GW:  {{ pfsense_wan_gateway }}"
+          - ""
           - "Next Steps:"
           - "  1. Open noVNC console"
           - "  2. Install pfSense from ISO"
           - "  3. Run post-install: ansible-playbook -i inventory.ini network/configure_pfsense_vm.yml --tags post_install_pfsense"
-          - "  4. Configure WAN interface (DHCP or static)"
-          - "  5. Configure LAN interfaces with gateway IPs"
-          - "  6. Set up firewall rules between VLANs"
+          - "  4. Configure WAN: Static IP {{ pfsense_wan_ip }}/24, Gateway {{ pfsense_wan_gateway }}"
+          - "  5. Configure LAN (vtnet1): 10.10.0.1/24 (Mgmt-Core-Net)"
+          - "  6. Configure remaining OPT interfaces with gateway IPs"
+          - "  7. Set up firewall rules between VLANs"
           - "=============================================="
 
 # ==================== POST-INSTALLATION PLAY ====================
