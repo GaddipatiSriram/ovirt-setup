@@ -212,6 +212,27 @@
         path: /root/engine-answers.conf
         state: absent
 
+    # Set default console to noVNC (browser-based)
+    - name: Set default VNC console to noVNC
+      ansible.builtin.command:
+        cmd: engine-config -s ClientModeVncDefault=NoVnc
+      register: console_config
+      changed_when: console_config.rc == 0
+
+    - name: Restart oVirt Engine for console setting
+      ansible.builtin.systemd:
+        name: ovirt-engine
+        state: restarted
+      when: console_config.changed
+
+    - name: Wait for oVirt Engine to be ready
+      ansible.builtin.wait_for:
+        port: 443
+        host: "{{ ovirt_engine_fqdn }}"
+        delay: 10
+        timeout: 120
+      when: console_config.changed
+
     # Display final status
     - name: Display final status
       ansible.builtin.debug:

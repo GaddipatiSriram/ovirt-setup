@@ -1,0 +1,44 @@
+---
+# clear-event.yaml - Clear/dismiss all events in oVirt Engine
+# Run: ansible-playbook -i inventory.ini clear-event.yaml
+
+- name: Clear oVirt Events
+  hosts: engine
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Authenticate to oVirt
+      ovirt.ovirt.ovirt_auth:
+        url: "https://{{ ovirt_engine_fqdn }}/ovirt-engine/api"
+        username: "admin@ovirt@internalsso"
+        password: "{{ ovirt_engine_admin_password }}"
+        insecure: true
+      register: ovirt_auth
+
+    - name: Get all uncleared events
+      ovirt.ovirt.ovirt_event_info:
+        auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+      register: events_info
+
+    - name: Display event count
+      ansible.builtin.debug:
+        msg: "Found {{ events_info.ovirt_events | length }} events"
+
+    - name: Clear events by deleting from database
+      ansible.builtin.command:
+        cmd: >
+          sudo -u postgres psql -d engine -c
+          "DELETE FROM audit_log WHERE processed = false;
+           UPDATE audit_log SET processed = true;"
+      register: clear_result
+      changed_when: true
+
+    - name: Display result
+      ansible.builtin.debug:
+        msg: "Events cleared from database"
+
+    - name: Revoke SSO token
+      ovirt.ovirt.ovirt_auth:
+        state: absent
+        ovirt_auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"

@@ -1,0 +1,77 @@
+---
+# tasks/download_single_image.yml - Download and upload a single cloud image
+# Called from download_cloud_images.yml
+
+- name: "Set image facts for {{ image_key }}"
+  ansible.builtin.set_fact:
+    current_image: "{{ cloud_images[image_key] }}"
+
+- name: "Check if {{ current_image.name }} already exists in oVirt"
+  ovirt.ovirt.ovirt_disk_info:
+    auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+    pattern: "name={{ current_image.name }}"
+  register: disk_check
+
+- name: "Process {{ current_image.name }}"
+  when: disk_check.ovirt_disks | length == 0
+  block:
+    - name: "Downloading {{ current_image.name }}..."
+      ansible.builtin.debug:
+        msg: "Downloading from {{ current_image.url }}"
+
+    - name: "Download {{ current_image.filename }}"
+      ansible.builtin.get_url:
+        url: "{{ current_image.url }}"
+        dest: "{{ download_dir }}/{{ current_image.filename }}"
+        mode: '0644'
+        timeout: 1800
+      register: download_result
+
+    - name: "Get image file info"
+      ansible.builtin.stat:
+        path: "{{ download_dir }}/{{ current_image.filename }}"
+      register: image_stat
+
+    - name: "Get qcow2 virtual size"
+      ansible.builtin.command:
+        cmd: "qemu-img info --output=json {{ download_dir }}/{{ current_image.filename }}"
+      register: qemu_info
+      changed_when: false
+
+    - name: "Parse virtual size"
+      ansible.builtin.set_fact:
+        virtual_size: "{{ (qemu_info.stdout | from_json)['virtual-size'] }}"
+
+    - name: "Display {{ current_image.name }} info"
+      ansible.builtin.debug:
+        msg: "Downloaded {{ current_image.filename }} ({{ (image_stat.stat.size / 1024 / 1024) | round(1) }} MB actual, {{ (virtual_size | int / 1024 / 1024 / 1024) | round(1) }} GB virtual)"
+
+    - name: "Upload {{ current_image.name }} to oVirt"
+      ovirt.ovirt.ovirt_disk:
+        auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+        name: "{{ current_image.name }}"
+        description: "{{ current_image.description }}"
+        storage_domain: "{{ storage_domain }}"
+        upload_image_path: "{{ download_dir }}/{{ current_image.filename }}"
+        size: "{{ virtual_size }}"
+        format: cow
+        content_type: data
+        bootable: true
+        sparse: true
+        wait: true
+        timeout: 900
+      register: upload_result
+
+    - name: "Clean up {{ current_image.filename }}"
+      ansible.builtin.file:
+        path: "{{ download_dir }}/{{ current_image.filename }}"
+        state: absent
+
+    - name: "Successfully uploaded {{ current_image.name }}"
+      ansible.builtin.debug:
+        msg: "{{ current_image.name }} uploaded successfully to {{ storage_domain }}"
+
+- name: "Skip {{ current_image.name }} - already exists"
+  ansible.builtin.debug:
+    msg: "{{ current_image.name }} already exists in oVirt, skipping"
+  when: disk_check.ovirt_disks | length > 0

@@ -1,0 +1,156 @@
+---
+# download_cloud_images.yml - Download and upload cloud images to oVirt
+# Run: ansible-playbook -i inventory.ini download_cloud_images.yml
+#
+# Override defaults with -e:
+#   ansible-playbook -i inventory.ini download_cloud_images.yml -e "images_to_download=['fedora41','rocky9']"
+#   ansible-playbook -i inventory.ini download_cloud_images.yml -e "images_to_download=['all']"
+
+- name: Download and Upload Cloud Images to oVirt
+  hosts: engine
+  become: true
+  gather_facts: false
+
+  vars:
+    # Storage settings
+    storage_domain: "data_lun"
+    download_dir: "/tmp/cloud-images"
+
+    # Which images to download (override with -e)
+    # Options: fedora41, fedora40, rocky9, rocky8, ubuntu2404, ubuntu2204, debian12, debian11, alma9, all
+    images_to_download:
+      - fedora41
+
+    # Image definitions
+    cloud_images:
+      fedora41:
+        name: "Fedora-41-Cloud"
+        filename: "Fedora-Cloud-Base-Generic-41-1.4.x86_64.qcow2"
+        url: "https://download.fedoraproject.org/pub/fedora/linux/releases/41/Cloud/x86_64/images/Fedora-Cloud-Base-Generic-41-1.4.x86_64.qcow2"
+        description: "Fedora 41 Cloud Base (December 2024)"
+        os_type: "fedora_64"
+
+      fedora40:
+        name: "Fedora-40-Cloud"
+        filename: "Fedora-Cloud-Base-Generic.x86_64-40-1.14.qcow2"
+        url: "https://download.fedoraproject.org/pub/fedora/linux/releases/40/Cloud/x86_64/images/Fedora-Cloud-Base-Generic.x86_64-40-1.14.qcow2"
+        description: "Fedora 40 Cloud Base"
+        os_type: "fedora_64"
+
+      rocky9:
+        name: "Rocky-9-Cloud"
+        filename: "Rocky-9-GenericCloud-Base.latest.x86_64.qcow2"
+        url: "https://download.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud-Base.latest.x86_64.qcow2"
+        description: "Rocky Linux 9 GenericCloud (Latest)"
+        os_type: "rhel_9x64"
+
+      rocky8:
+        name: "Rocky-8-Cloud"
+        filename: "Rocky-8-GenericCloud-Base.latest.x86_64.qcow2"
+        url: "https://download.rockylinux.org/pub/rocky/8/images/x86_64/Rocky-8-GenericCloud-Base.latest.x86_64.qcow2"
+        description: "Rocky Linux 8 GenericCloud (Latest)"
+        os_type: "rhel_8x64"
+
+      alma9:
+        name: "AlmaLinux-9-Cloud"
+        filename: "AlmaLinux-9-GenericCloud-latest.x86_64.qcow2"
+        url: "https://repo.almalinux.org/almalinux/9/cloud/x86_64/images/AlmaLinux-9-GenericCloud-latest.x86_64.qcow2"
+        description: "AlmaLinux 9 GenericCloud (Latest)"
+        os_type: "rhel_9x64"
+
+      ubuntu2404:
+        name: "Ubuntu-24.04-Cloud"
+        filename: "ubuntu-24.04-server-cloudimg-amd64.img"
+        url: "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"
+        description: "Ubuntu 24.04 LTS Noble Numbat Cloud"
+        os_type: "ubuntu_64"
+
+      ubuntu2204:
+        name: "Ubuntu-22.04-Cloud"
+        filename: "ubuntu-22.04-server-cloudimg-amd64.img"
+        url: "https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img"
+        description: "Ubuntu 22.04 LTS Jammy Jellyfish Cloud"
+        os_type: "ubuntu_64"
+
+      debian12:
+        name: "Debian-12-Cloud"
+        filename: "debian-12-generic-amd64.qcow2"
+        url: "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2"
+        description: "Debian 12 Bookworm Cloud"
+        os_type: "debian_64"
+
+      debian11:
+        name: "Debian-11-Cloud"
+        filename: "debian-11-generic-amd64.qcow2"
+        url: "https://cloud.debian.org/images/cloud/bullseye/latest/debian-11-generic-amd64.qcow2"
+        description: "Debian 11 Bullseye Cloud"
+        os_type: "debian_64"
+
+  tasks:
+    # ==================== SETUP ====================
+    - name: Install required packages
+      ansible.builtin.dnf:
+        name:
+          - python3-ovirt-engine-sdk4
+          - qemu-img
+        state: present
+
+    - name: Create download directory
+      ansible.builtin.file:
+        path: "{{ download_dir }}"
+        state: directory
+        mode: '0755'
+
+    # ==================== AUTHENTICATE ====================
+    - name: Obtain SSO token from oVirt Engine
+      ovirt.ovirt.ovirt_auth:
+        url: "https://{{ ovirt_engine_fqdn }}/ovirt-engine/api"
+        username: "admin@ovirt@internalsso"
+        password: "{{ ovirt_engine_admin_password }}"
+        insecure: true
+      register: ovirt_auth
+
+    # ==================== BUILD IMAGE LIST ====================
+    - name: Build list of images to process
+      ansible.builtin.set_fact:
+        process_images: "{{ (images_to_download | intersect(['all'])) | ternary(cloud_images.keys() | list, images_to_download) }}"
+
+    - name: Display images to download
+      ansible.builtin.debug:
+        msg: "Will download: {{ process_images | join(', ') }}"
+
+    # ==================== PROCESS EACH IMAGE ====================
+    - name: Process cloud images
+      ansible.builtin.include_tasks: tasks/download_single_image.yml
+      loop: "{{ process_images }}"
+      loop_control:
+        loop_var: image_key
+      when: image_key in cloud_images
+
+    # ==================== CLEANUP ====================
+    - name: Revoke SSO token
+      ovirt.ovirt.ovirt_auth:
+        state: absent
+        ovirt_auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+
+    - name: Clean up download directory
+      ansible.builtin.file:
+        path: "{{ download_dir }}"
+        state: absent
+
+    # ==================== SUMMARY ====================
+    - name: Display summary
+      ansible.builtin.debug:
+        msg:
+          - "=============================================="
+          - "Cloud Images Upload Complete!"
+          - "=============================================="
+          - ""
+          - "Images uploaded to storage domain: {{ storage_domain }}"
+          - ""
+          - "To create a VM from an image:"
+          - "  1. Go to Compute > Virtual Machines > New"
+          - "  2. Select 'Instance Images' under Storage"
+          - "  3. Choose the uploaded disk image"
+          - "  4. Configure cloud-init settings"
+          - "=============================================="

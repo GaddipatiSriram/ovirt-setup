@@ -1,0 +1,366 @@
+---
+# create_template.yml - Create VM template from cloud image
+# Run: ansible-playbook -i inventory.ini create_template.yml
+#
+# Override defaults:
+#   ansible-playbook -i inventory.ini create_template.yml -e "image_source=rocky9"
+#   ansible-playbook -i inventory.ini create_template.yml -e "template_name=my-template network_name=Dev-App-Net"
+
+- name: Create VM Template
+  hosts: engine
+  become: true
+  gather_facts: false
+
+  vars:
+    # Image source (fedora41, fedora40, rocky9, rocky8, alma9, ubuntu2404, ubuntu2204, debian12, debian11)
+    image_source: "fedora41"
+
+    # Template settings
+    template_name: "fedora-41-mgmt"
+    template_description: "Fedora 41 template for Mgmt-Core-Net"
+
+    # VM specs
+    vm_memory: 2GiB
+    vm_memory_guaranteed: 1GiB
+    vm_cpu_sockets: 1
+    vm_cpu_cores: 2
+    vm_disk_size: 20GiB
+
+    # Infrastructure
+    storage_domain: "data_lun"
+    cluster_name: "Default"
+    network_name: "Mgmt-Core-Net"
+    download_dir: "/tmp/cloud-images"
+
+    # Cloud-init defaults
+    default_user: "admin"
+    default_password: "changeme"
+
+    # Image definitions
+    cloud_images:
+      fedora41:
+        name: "Fedora-41-Cloud"
+        filename: "Fedora-Cloud-Base-Generic-41-1.4.x86_64.qcow2"
+        url: "https://download.fedoraproject.org/pub/fedora/linux/releases/41/Cloud/x86_64/images/Fedora-Cloud-Base-Generic-41-1.4.x86_64.qcow2"
+        os_type: "fedora_64"
+        bios_type: "q35_sea_bios"
+
+      fedora40:
+        name: "Fedora-40-Cloud"
+        filename: "Fedora-Cloud-Base-Generic.x86_64-40-1.14.qcow2"
+        url: "https://download.fedoraproject.org/pub/fedora/linux/releases/40/Cloud/x86_64/images/Fedora-Cloud-Base-Generic.x86_64-40-1.14.qcow2"
+        os_type: "fedora_64"
+        bios_type: "q35_ovmf"
+
+      rocky9:
+        name: "Rocky-9-Cloud"
+        filename: "Rocky-9-GenericCloud-Base.latest.x86_64.qcow2"
+        url: "https://download.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud-Base.latest.x86_64.qcow2"
+        os_type: "rhel_9x64"
+        bios_type: "q35_sea_bios"
+
+      rocky8:
+        name: "Rocky-8-Cloud"
+        filename: "Rocky-8-GenericCloud-Base.latest.x86_64.qcow2"
+        url: "https://download.rockylinux.org/pub/rocky/8/images/x86_64/Rocky-8-GenericCloud-Base.latest.x86_64.qcow2"
+        os_type: "rhel_8x64"
+        bios_type: "q35_sea_bios"
+
+      alma9:
+        name: "AlmaLinux-9-Cloud"
+        filename: "AlmaLinux-9-GenericCloud-latest.x86_64.qcow2"
+        url: "https://repo.almalinux.org/almalinux/9/cloud/x86_64/images/AlmaLinux-9-GenericCloud-latest.x86_64.qcow2"
+        os_type: "rhel_9x64"
+        bios_type: "q35_sea_bios"
+
+      ubuntu2404:
+        name: "Ubuntu-24.04-Cloud"
+        filename: "ubuntu-24.04-server-cloudimg-amd64.img"
+        url: "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"
+        os_type: "ubuntu_64"
+        bios_type: "q35_ovmf"
+
+      ubuntu2204:
+        name: "Ubuntu-22.04-Cloud"
+        filename: "ubuntu-22.04-server-cloudimg-amd64.img"
+        url: "https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img"
+        os_type: "ubuntu_64"
+        bios_type: "q35_ovmf"
+
+      debian12:
+        name: "Debian-12-Cloud"
+        filename: "debian-12-generic-amd64.qcow2"
+        url: "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2"
+        os_type: "debian_64"
+        bios_type: "q35_sea_bios"
+
+      debian11:
+        name: "Debian-11-Cloud"
+        filename: "debian-11-generic-amd64.qcow2"
+        url: "https://cloud.debian.org/images/cloud/bullseye/latest/debian-11-generic-amd64.qcow2"
+        os_type: "debian_64"
+        bios_type: "q35_sea_bios"
+
+  tasks:
+    # ==================== SETUP ====================
+    - name: Set image facts
+      ansible.builtin.set_fact:
+        image: "{{ cloud_images[image_source] }}"
+        builder_vm_name: "{{ template_name }}-builder"
+
+    - name: Display configuration
+      ansible.builtin.debug:
+        msg:
+          - "Creating template: {{ template_name }}"
+          - "Source image: {{ image.name }}"
+          - "Network: {{ network_name }}"
+
+    - name: Install required packages
+      ansible.builtin.dnf:
+        name:
+          - python3-ovirt-engine-sdk4
+          - qemu-img
+        state: present
+
+    - name: Create download directory
+      ansible.builtin.file:
+        path: "{{ download_dir }}"
+        state: directory
+        mode: '0755'
+
+    # ==================== AUTHENTICATE ====================
+    - name: Obtain SSO token from oVirt Engine
+      ovirt.ovirt.ovirt_auth:
+        url: "https://{{ ovirt_engine_fqdn }}/ovirt-engine/api"
+        username: "admin@ovirt@internalsso"
+        password: "{{ ovirt_engine_admin_password }}"
+        insecure: true
+      register: ovirt_auth
+
+    # ==================== CHECK PREREQUISITES ====================
+    - name: Check if template already exists
+      ovirt.ovirt.ovirt_template_info:
+        auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+        pattern: "name={{ template_name }}"
+      register: template_check
+
+    - name: Fail if template exists
+      ansible.builtin.fail:
+        msg: "Template '{{ template_name }}' already exists. Delete it or use a different name."
+      when: template_check.ovirt_templates | length > 0
+
+    # ==================== DOWNLOAD IMAGE ====================
+    - name: Check if image disk exists in oVirt
+      ovirt.ovirt.ovirt_disk_info:
+        auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+        pattern: "name={{ image.name }}"
+      register: disk_check
+
+    - name: Download cloud image if needed
+      when: disk_check.ovirt_disks | length == 0
+      block:
+        - name: Download cloud image
+          ansible.builtin.get_url:
+            url: "{{ image.url }}"
+            dest: "{{ download_dir }}/{{ image.filename }}"
+            mode: '0644'
+            timeout: 1800
+
+        - name: Get downloaded file size
+          ansible.builtin.stat:
+            path: "{{ download_dir }}/{{ image.filename }}"
+          register: image_stat
+
+        - name: Display download info
+          ansible.builtin.debug:
+            msg: "Downloaded {{ image.filename }} ({{ (image_stat.stat.size / 1024 / 1024) | round(1) }} MB)"
+
+        - name: Upload image to oVirt (using fixed {{ vm_disk_size }} disk)
+          ovirt.ovirt.ovirt_disk:
+            auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+            name: "{{ image.name }}"
+            description: "Cloud image for {{ image_source }}"
+            storage_domain: "{{ storage_domain }}"
+            upload_image_path: "{{ download_dir }}/{{ image.filename }}"
+            size: "{{ vm_disk_size }}"
+            format: cow
+            content_type: data
+            bootable: true
+            sparse: true
+            wait: true
+            timeout: 900
+
+        - name: Cleanup downloaded file
+          ansible.builtin.file:
+            path: "{{ download_dir }}/{{ image.filename }}"
+            state: absent
+
+    # ==================== CREATE BUILDER VM ====================
+    - name: Create builder VM
+      ovirt.ovirt.ovirt_vm:
+        auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+        name: "{{ builder_vm_name }}"
+        cluster: "{{ cluster_name }}"
+        memory: "{{ vm_memory }}"
+        memory_guaranteed: "{{ vm_memory_guaranteed }}"
+        memory_max: 4GiB
+        cpu_sockets: "{{ vm_cpu_sockets }}"
+        cpu_cores: "{{ vm_cpu_cores }}"
+        operating_system: "{{ image.os_type }}"
+        type: server
+        bios_type: "{{ image.bios_type }}"
+        graphical_console:
+          protocol:
+            - vnc
+        cloud_init:
+          host_name: "template-builder"
+          root_password: "{{ default_password }}"
+          regenerate_ssh_keys: true
+          custom_script: |
+            #cloud-config
+            package_update: false
+            package_upgrade: false
+            packages:
+              - qemu-guest-agent
+              - cloud-init
+            runcmd:
+              - systemctl enable qemu-guest-agent
+              - systemctl start qemu-guest-agent
+              - sleep 10
+              - cloud-init clean --logs
+              - rm -rf /var/lib/cloud/instances/*
+              - rm -f /etc/machine-id
+              - touch /etc/machine-id
+        state: present
+      register: vm_created
+
+    # ==================== ATTACH DISK ====================
+    - name: Get source disk info
+      ovirt.ovirt.ovirt_disk_info:
+        auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+        pattern: "name={{ image.name }}"
+      register: source_disk
+
+    - name: Attach source disk to VM
+      ovirt.ovirt.ovirt_disk:
+        auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+        id: "{{ source_disk.ovirt_disks[0].id }}"
+        vm_name: "{{ builder_vm_name }}"
+        interface: virtio_scsi
+        bootable: true
+        activate: true
+        state: attached
+        timeout: 300
+
+    # ==================== CONFIGURE NETWORK ====================
+    - name: Remove default NIC
+      ovirt.ovirt.ovirt_nic:
+        auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+        vm: "{{ builder_vm_name }}"
+        name: "nic1"
+        state: absent
+      ignore_errors: true
+
+    - name: Add NIC on target network
+      ovirt.ovirt.ovirt_nic:
+        auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+        vm: "{{ builder_vm_name }}"
+        name: "nic1"
+        profile: "{{ network_name }}"
+        network: "{{ network_name }}"
+        interface: virtio
+        state: present
+
+    # ==================== INITIALIZE VM ====================
+    - name: Start VM for cloud-init
+      ovirt.ovirt.ovirt_vm:
+        auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+        name: "{{ builder_vm_name }}"
+        state: running
+        wait: true
+
+    - name: Wait for cloud-init and cleanup (120 seconds)
+      ansible.builtin.pause:
+        seconds: 120
+        prompt: "Waiting for cloud-init to complete and clean up..."
+
+    - name: Stop VM for sealing
+      ovirt.ovirt.ovirt_vm:
+        auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+        name: "{{ builder_vm_name }}"
+        state: stopped
+        wait: true
+
+    # ==================== CREATE TEMPLATE ====================
+    - name: Create template from VM (this may take several minutes)
+      ovirt.ovirt.ovirt_template:
+        auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+        name: "{{ template_name }}"
+        description: "{{ template_description }}"
+        vm: "{{ builder_vm_name }}"
+        cluster: "{{ cluster_name }}"
+        seal: false
+        state: present
+        timeout: 1800
+
+    - name: Wait for template
+      ovirt.ovirt.ovirt_template_info:
+        auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+        pattern: "name={{ template_name }}"
+      register: template_info
+      until: template_info.ovirt_templates | length > 0 and template_info.ovirt_templates[0].status == 'ok'
+      retries: 30
+      delay: 10
+
+    # ==================== CLEANUP ====================
+    - name: Detach source disk from builder VM (preserve for reuse)
+      ovirt.ovirt.ovirt_disk:
+        auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+        id: "{{ source_disk.ovirt_disks[0].id }}"
+        vm_name: "{{ builder_vm_name }}"
+        state: detached
+      ignore_errors: true
+
+    - name: Delete builder VM
+      ovirt.ovirt.ovirt_vm:
+        auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+        name: "{{ builder_vm_name }}"
+        state: absent
+        wait: true
+
+    - name: Revoke SSO token
+      ovirt.ovirt.ovirt_auth:
+        state: absent
+        ovirt_auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+
+    - name: Cleanup download directory
+      ansible.builtin.file:
+        path: "{{ download_dir }}"
+        state: absent
+
+    # ==================== SUMMARY ====================
+    - name: Display summary
+      ansible.builtin.debug:
+        msg:
+          - "=============================================="
+          - "Template Created Successfully!"
+          - "=============================================="
+          - ""
+          - "Template: {{ template_name }}"
+          - "OS: {{ image_source }}"
+          - "Network: {{ network_name }}"
+          - "Cluster: {{ cluster_name }}"
+          - ""
+          - "Specs:"
+          - "  Memory: {{ vm_memory }}"
+          - "  CPU: {{ vm_cpu_cores }} cores"
+          - "  BIOS: {{ image.bios_type }}"
+          - ""
+          - "Default credentials:"
+          - "  User: {{ default_user }}"
+          - "  Password: {{ default_password }}"
+          - ""
+          - "=============================================="
+          - "Create VMs from template:"
+          - "  Compute > Templates > {{ template_name }} > New VM"
+          - "=============================================="

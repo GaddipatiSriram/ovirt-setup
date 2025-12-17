@@ -1,0 +1,193 @@
+---
+# deploy_vms.yml - Deploy VMs from template
+# Run: ansible-playbook -i inventory.ini deploy_vms.yml
+#
+# Override with:
+#   ansible-playbook -i inventory.ini deploy_vms.yml -e "vm_size=large"
+#   ansible-playbook -i inventory.ini deploy_vms.yml -e "vm_count=5"
+
+- name: Deploy VMs from Template
+  hosts: engine
+  become: true
+  gather_facts: false
+
+  vars:
+    # Template to use
+    template_name: "fedora-41-mgmt"
+
+    # Infrastructure
+    cluster_name: "Default"
+    storage_domain: "data_lun"
+
+    # VM naming
+    vm_prefix: "fedora-mgmt"
+    vm_count: 3
+
+    # VM size: small, medium, large
+    vm_size: "medium"
+
+    # Size definitions
+    vm_sizes:
+      small:
+        memory: 1GiB
+        memory_guaranteed: 512MiB
+        cpu_cores: 1
+        disk_size: 20GiB
+      medium:
+        memory: 2GiB
+        memory_guaranteed: 1GiB
+        cpu_cores: 2
+        disk_size: 40GiB
+      large:
+        memory: 4GiB
+        memory_guaranteed: 2GiB
+        cpu_cores: 4
+        disk_size: 80GiB
+
+    # Cloud-init settings
+    root_password: "unix"
+    admin_user: "admin"
+    admin_password: "unix"
+    domain: "engatwork.com"
+
+  tasks:
+    # ==================== AUTHENTICATE ====================
+    - name: Obtain SSO token from oVirt Engine
+      ovirt.ovirt.ovirt_auth:
+        url: "https://{{ ovirt_engine_fqdn }}/ovirt-engine/api"
+        username: "admin@ovirt@internalsso"
+        password: "{{ ovirt_engine_admin_password }}"
+        insecure: true
+      register: ovirt_auth
+
+    # ==================== VALIDATE ====================
+    - name: Get selected size config
+      ansible.builtin.set_fact:
+        size_config: "{{ vm_sizes[vm_size] }}"
+
+    - name: Display deployment plan
+      ansible.builtin.debug:
+        msg:
+          - "=============================================="
+          - "VM Deployment Plan"
+          - "=============================================="
+          - "Template: {{ template_name }}"
+          - "Count: {{ vm_count }} VMs"
+          - "Size: {{ vm_size }}"
+          - "  Memory: {{ size_config.memory }}"
+          - "  CPU: {{ size_config.cpu_cores }} cores"
+          - "  Disk: {{ size_config.disk_size }}"
+          - ""
+          - "VMs to create:"
+          - "{% for i in range(1, vm_count|int + 1) %}  - {{ vm_prefix }}-{{ '%02d' | format(i) }}\n{% endfor %}"
+          - "=============================================="
+
+    - name: Check template exists
+      ovirt.ovirt.ovirt_template_info:
+        auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+        pattern: "name={{ template_name }}"
+      register: template_info
+
+    - name: Fail if template not found
+      ansible.builtin.fail:
+        msg: "Template '{{ template_name }}' not found"
+      when: template_info.ovirt_templates | length == 0
+
+    # ==================== CREATE VMs ====================
+    - name: Create VMs from template
+      ovirt.ovirt.ovirt_vm:
+        auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+        name: "{{ vm_prefix }}-{{ '%02d' | format(item) }}"
+        template: "{{ template_name }}"
+        cluster: "{{ cluster_name }}"
+        memory: "{{ size_config.memory }}"
+        memory_guaranteed: "{{ size_config.memory_guaranteed }}"
+        cpu_cores: "{{ size_config.cpu_cores }}"
+        clone: true
+        cloud_init:
+          host_name: "{{ vm_prefix }}-{{ '%02d' | format(item) }}"
+          root_password: "{{ root_password }}"
+          user_name: "{{ admin_user }}"
+          regenerate_ssh_keys: true
+          custom_script: |
+            #cloud-config
+            ssh_pwauth: true
+            chpasswd:
+              expire: false
+              users:
+                - name: root
+                  password: {{ root_password }}
+                  type: text
+                - name: {{ admin_user }}
+                  password: {{ admin_password }}
+                  type: text
+            users:
+              - default
+              - name: {{ admin_user }}
+                groups: wheel
+                sudo: ALL=(ALL) NOPASSWD:ALL
+                shell: /bin/bash
+                lock_passwd: false
+                plain_text_passwd: {{ admin_password }}
+            runcmd:
+              - sed -i 's/^#*PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
+              - sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+              - systemctl restart sshd
+        cloud_init_persist: true
+        state: present
+        wait: true
+        timeout: 600
+      loop: "{{ range(1, vm_count|int + 1) | list }}"
+      loop_control:
+        label: "{{ vm_prefix }}-{{ '%02d' | format(item) }}"
+      register: created_vms
+
+    # ==================== START VMs WITH INIT ====================
+    - name: Start VMs with cloud-init
+      ovirt.ovirt.ovirt_vm:
+        auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+        name: "{{ vm_prefix }}-{{ '%02d' | format(item) }}"
+        cloud_init_persist: true
+        state: running
+        wait: true
+      loop: "{{ range(1, vm_count|int + 1) | list }}"
+      loop_control:
+        label: "{{ vm_prefix }}-{{ '%02d' | format(item) }}"
+
+    # ==================== GET VM INFO ====================
+    - name: Wait for VMs to get IP addresses (60 seconds)
+      ansible.builtin.pause:
+        seconds: 60
+        prompt: "Waiting for VMs to boot and get IPs..."
+
+    - name: Get VM information
+      ovirt.ovirt.ovirt_vm_info:
+        auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+        pattern: "name={{ vm_prefix }}-*"
+        fetch_nested: true
+        nested_attributes:
+          - ips
+      register: vm_info
+
+    # ==================== CLEANUP ====================
+    - name: Revoke SSO token
+      ovirt.ovirt.ovirt_auth:
+        state: absent
+        ovirt_auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+
+    # ==================== SUMMARY ====================
+    - name: Display deployment summary
+      ansible.builtin.debug:
+        msg:
+          - "=============================================="
+          - "VM Deployment Complete!"
+          - "=============================================="
+          - ""
+          - "Created {{ vm_count }} VMs:"
+          - "{% for vm in vm_info.ovirt_vms %}  - {{ vm.name }}: {{ vm.status }}{% if vm.reported_devices %} ({{ vm.reported_devices[0].ips[0].address | default('no IP yet') }}){% endif %}\n{% endfor %}"
+          - ""
+          - "Credentials:"
+          - "  root / {{ root_password }}"
+          - "  {{ admin_user }} / {{ admin_password }}"
+          - ""
+          - "=============================================="
