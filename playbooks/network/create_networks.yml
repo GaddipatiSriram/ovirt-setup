@@ -1,0 +1,150 @@
+---
+# create_networks.yml - Create VLAN networks and attach to host
+# Run: ansible-playbook -i inventory.ini network/create_networks.yml
+#
+# Simplified Network Architecture (7 networks):
+#   - Management: VLAN 10-12 (3 networks)
+#   - Development: VLAN 20-21 (2 networks)
+#   - Production:  VLAN 30-31 (2 networks)
+
+- name: Create VLAN Networks (Simplified Architecture)
+  hosts: engine
+  become: true
+  gather_facts: true
+
+  vars:
+    datacenter_name: "Default"
+    cluster_name: "Default"
+    host_name: "node"
+    nic_name: "eno1"
+
+    # Simplified VLAN networks (7 total)
+    vlan_networks:
+      # Management networks (VLAN 10-12)
+      - name: "Mgmt-Core-Net"
+        vlan_id: 10
+        subnet: "10.10.0.0/24"
+        gateway: "10.10.0.1"
+        description: "Core infrastructure - DNS, NTP, LDAP, Bastion, VPN"
+
+      - name: "Mgmt-DevOps-Net"
+        vlan_id: 11
+        subnet: "10.10.1.0/24"
+        gateway: "10.10.1.1"
+        description: "DevOps - ArgoCD, Jenkins, GitLab, Harbor"
+
+      - name: "Mgmt-Observ-Net"
+        vlan_id: 12
+        subnet: "10.10.2.0/24"
+        gateway: "10.10.2.1"
+        description: "Observability - Grafana, Prometheus, Loki, Tempo"
+
+      # Development networks (VLAN 20-21)
+      - name: "Dev-Apps-Net"
+        vlan_id: 20
+        subnet: "10.20.0.0/24"
+        gateway: "10.20.0.1"
+        description: "Dev Applications - Web, App, API, K8s workers"
+
+      - name: "Dev-Data-Net"
+        vlan_id: 21
+        subnet: "10.20.1.0/24"
+        gateway: "10.20.1.1"
+        description: "Dev Data - PostgreSQL, Redis, Kafka, Elasticsearch"
+
+      # Production networks (VLAN 30-31)
+      - name: "Prod-Apps-Net"
+        vlan_id: 30
+        subnet: "10.30.0.0/24"
+        gateway: "10.30.0.1"
+        description: "Prod Applications - Web, App, API, K8s workers"
+
+      - name: "Prod-Data-Net"
+        vlan_id: 31
+        subnet: "10.30.1.0/24"
+        gateway: "10.30.1.1"
+        description: "Prod Data - PostgreSQL, Redis, Kafka, Elasticsearch"
+
+  tasks:
+    - name: Obtain SSO token from oVirt Engine
+      ovirt.ovirt.ovirt_auth:
+        url: "https://{{ ovirt_engine_fqdn }}/ovirt-engine/api"
+        username: "admin@ovirt@internalsso"
+        password: "{{ ovirt_engine_admin_password }}"
+        insecure: true
+      register: ovirt_auth
+
+    # ==================== STEP 1: CREATE VLAN NETWORKS ====================
+    - name: Create VLAN networks in datacenter
+      ovirt.ovirt.ovirt_network:
+        auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+        name: "{{ item.name }}"
+        data_center: "{{ datacenter_name }}"
+        description: "{{ item.description }} ({{ item.subnet }}) - GW: {{ item.gateway }}"
+        vlan_tag: "{{ item.vlan_id }}"
+        vm_network: true
+        mtu: 1500
+        state: present
+      loop: "{{ vlan_networks }}"
+      loop_control:
+        label: "{{ item.name }} (VLAN {{ item.vlan_id }})"
+
+    # ==================== STEP 2: ASSIGN TO DEFAULT CLUSTER ====================
+    - name: Assign networks to Default cluster (required=false)
+      ovirt.ovirt.ovirt_network:
+        auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+        name: "{{ item.name }}"
+        data_center: "{{ datacenter_name }}"
+        clusters:
+          - name: "{{ cluster_name }}"
+            assigned: true
+            required: false
+            migration: false
+            display: false
+        state: present
+      loop: "{{ vlan_networks }}"
+      loop_control:
+        label: "{{ item.name }} -> {{ cluster_name }}"
+
+    # ==================== STEP 3: ATTACH TO HOST NIC ====================
+    - name: Attach VLAN networks to host NIC
+      ovirt.ovirt.ovirt_host_network:
+        auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+        name: "{{ host_name }}"
+        interface: "{{ nic_name }}"
+        networks:
+          - name: "{{ item.name }}"
+        save: true
+      loop: "{{ vlan_networks }}"
+      loop_control:
+        label: "{{ item.name }} -> {{ nic_name }}.{{ item.vlan_id }}"
+
+    # ==================== CLEANUP ====================
+    - name: Revoke SSO token
+      ovirt.ovirt.ovirt_auth:
+        state: absent
+        ovirt_auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+
+    - name: Display summary
+      ansible.builtin.debug:
+        msg:
+          - "=============================================="
+          - "VLAN Networks Setup Complete (Simplified)"
+          - "=============================================="
+          - ""
+          - "MANAGEMENT (VLAN 10-12):"
+          - "  {{ nic_name }}.10  Mgmt-Core-Net     10.10.0.0/24  (DNS, NTP, LDAP, Bastion)"
+          - "  {{ nic_name }}.11  Mgmt-DevOps-Net   10.10.1.0/24  (ArgoCD, Jenkins, GitLab)"
+          - "  {{ nic_name }}.12  Mgmt-Observ-Net   10.10.2.0/24  (Grafana, Prometheus)"
+          - ""
+          - "DEVELOPMENT (VLAN 20-21):"
+          - "  {{ nic_name }}.20  Dev-Apps-Net      10.20.0.0/24  (Web, App, K8s)"
+          - "  {{ nic_name }}.21  Dev-Data-Net      10.20.1.0/24  (PostgreSQL, Redis)"
+          - ""
+          - "PRODUCTION (VLAN 30-31):"
+          - "  {{ nic_name }}.30  Prod-Apps-Net     10.30.0.0/24  (Web, App, K8s)"
+          - "  {{ nic_name }}.31  Prod-Data-Net     10.30.1.0/24  (PostgreSQL, Redis)"
+          - ""
+          - "=============================================="
+          - "Total: 7 VLAN networks ready for VMs"
+          - "=============================================="

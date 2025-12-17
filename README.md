@@ -1,125 +1,100 @@
-# oVirt Engine Standalone Deployment on Rocky Linux 9
+# oVirt Infrastructure Deployment
 
-Ansible playbooks for deploying oVirt Engine standalone with local databases on bare metal Rocky Linux 9.
+Ansible playbooks for deploying oVirt Engine, networking (pfSense), and compute resources on Rocky Linux 9.
 
-**Reference:** https://www.ovirt.org/documentation/installing_ovirt_as_a_standalone_manager_with_local_databases/
+## Project Structure
+
+```
+ovirt-setup/
+├── ansible.cfg                     # Ansible configuration
+├── inventory/
+│   ├── hosts.ini                   # Host inventory
+│   └── group_vars/
+│       └── all.yml                 # Global variables
+├── playbooks/
+│   ├── ovirt/                      # oVirt Engine setup
+│   ├── network/                    # Network & pfSense
+│   └── compute/                    # VMs & templates
+├── collections/
+│   └── requirements.yml            # Ansible collections
+├── templates/                      # Jinja2 templates
+├── tasks/                          # Reusable task files
+└── docs/                           # Documentation
+```
 
 ## Prerequisites
 
-- Clean Rocky Linux 9 minimal install (bare metal)
-- Virtualization extensions enabled in BIOS (Intel VT-x/AMD-V)
-- Working network configuration
-- Root access
+- Rocky Linux 9 minimal install (bare metal)
+- Virtualization extensions enabled (Intel VT-x/AMD-V)
 - Minimum: 4-core CPU, 16GB RAM, 50GB disk
+- Root access
 
 ## Quick Start
 
 ```bash
-# 1. Install ansible-core
+# 1. Install Ansible
 dnf install -y ansible-core
 
 # 2. Install required collections
-cd /root/ovirt-deploy
-ansible-galaxy collection install -r requirements.yml
+cd /root/ovirt-setup
+ansible-galaxy collection install -r collections/requirements.yml
 
-# 3. Verify ansible uses Python 3.9
-ansible --version
-# Should show: python version = 3.9.x
+# 3. Configure variables
+vi inventory/group_vars/all.yml
 
-# 4. Run all playbooks
-ansible-playbook -i inventory.ini site.yml
+# 4. Deploy oVirt Engine
+ansible-playbook playbooks/ovirt/site.yml
 
-# Or run individually:
-ansible-playbook -i inventory.ini prep_host.yml
-ansible-playbook -i inventory.ini install_engine.yml
-ansible-playbook -i inventory.ini post_install.yml
+# 5. Setup networks
+ansible-playbook playbooks/network/create_networks.yml
+ansible-playbook playbooks/network/configure_pfsense_vm.yml
+
+# 6. Deploy VMs
+ansible-playbook playbooks/compute/create_template.yml
+ansible-playbook playbooks/compute/deploy_vms.yml
 ```
 
-## Troubleshooting Ansible
+## Playbook Categories
 
-If you hit module/import issues:
+| Category | Path | Description |
+|----------|------|-------------|
+| **oVirt** | `playbooks/ovirt/` | Engine installation, host setup, storage |
+| **Network** | `playbooks/network/` | VLAN networks, pfSense firewall |
+| **Compute** | `playbooks/compute/` | Cloud images, templates, VM deployment |
 
-```bash
-# Upgrade ansible-core via pip
-python3.9 -m ensurepip
-python3.9 -m pip install ansible-core==2.17.4
-
-# Remove dnf ansible-core to avoid path conflicts
-dnf remove ansible-core
-
-# Verify and rerun
-ansible --version
-ansible-playbook -i inventory.ini site.yml
-```
+See README.md in each playbook directory for details.
 
 ## Configuration
 
-Edit `group_vars/all.yml` before running:
+Edit `inventory/group_vars/all.yml`:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `ovirt_engine_fqdn` | ovirt.engatwork.com | Engine FQDN |
 | `ovirt_engine_admin_password` | unix | Admin portal password |
-| `host_root_password` | unix | Root password for host enrollment |
+| `host_root_password` | unix | Host enrollment password |
+| `ovirt_storage_type` | lun | Storage type (lun/none) |
+| `ovirt_lun_id` | (set yours) | Direct LUN ID from `multipath -ll` |
 
-## File Structure
+## Access
 
-```
-ovirt-deploy/
-├── inventory.ini          # Localhost inventory
-├── group_vars/
-│   └── all.yml           # Variables (passwords, FQDN, etc.)
-├── templates/
-│   ├── chrony.conf.j2    # NTP configuration
-│   ├── engine-answers.conf.j2  # engine-setup answers
-│   └── exports.j2        # NFS exports
-├── prep_host.yml         # OS preparation
-├── install_engine.yml    # Engine installation
-├── post_install.yml      # Add host & storage
-├── site.yml              # Master playbook
-└── requirements.yml      # Ansible collections
-```
+After deployment:
 
-## Playbook Details
+| Service | URL |
+|---------|-----|
+| Admin Portal | https://ovirt.engatwork.com/ovirt-engine/ |
+| VM Portal | https://ovirt.engatwork.com/ovirt-engine/web-ui |
+| pfSense | https://192.168.0.101/ |
 
-### prep_host.yml
-- Sets hostname to `node.engatwork.com`
-- Configures `/etc/hosts`
-- Sets SELinux permissive
-- Configures chrony (NTP)
-- Adds oVirt 4.5 repos
-- Enables required dnf modules
-- Installs virtualization packages
-- Configures NFS storage directories
-- Opens firewall ports
+**Credentials:** admin@ovirt / unix
 
-### install_engine.yml
-- Installs `ovirt-engine` package
-- Generates answer file from template
-- Runs `engine-setup --accept-defaults`
-- Starts oVirt services
+## Documentation
 
-### post_install.yml
-- Installs host packages (vdsm, ovirt-host)
-- Creates datacenter and cluster
-- Adds localhost as hypervisor host
-- Configures NFS storage domains
+- [Network Architecture](docs/network-architecture.md) - VLAN design, pfSense interfaces
+- [Post Setup Guide](docs/post-setup.md) - Manual configuration steps
 
-## Access oVirt
+## Requirements
 
-After installation:
-
-- **Admin Portal:** https://ovirt.engatwork.com/ovirt-engine/
-- **VM Portal:** https://ovirt.engatwork.com/ovirt-engine/web-ui
-- **Username:** admin@internal
-- **Password:** unix
-
-## Important Notes
-
-- **EL9 only** - Do not run on EL8 or EL10
-- Engine FQDN must resolve via DNS or `/etc/hosts`
-- IPv6 must remain enabled
-- Host enrollment requires root password
-# ovirt-setup
-# ovirt-setup
-# ovirt-setup
+- Rocky Linux 9 / RHEL 9 / AlmaLinux 9
+- oVirt 4.5
+- Ansible 2.14+

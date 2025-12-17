@@ -1,0 +1,247 @@
+---
+# prep_host.yml - Prepare Rocky Linux 9 for oVirt Engine installation
+# Reference: https://www.ovirt.org/documentation/installing_ovirt_as_a_standalone_manager_with_local_databases/
+# Run: ansible-playbook -i inventory.ini prep_host.yml
+
+- name: Prepare host for oVirt Engine
+  hosts: engine
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Assert running on EL9
+      ansible.builtin.assert:
+        that:
+          - ansible_distribution_major_version == "9"
+          - ansible_os_family == "RedHat"
+        fail_msg: "This playbook only supports EL9 (Rocky/RHEL/AlmaLinux 9). Do not run on EL8/EL10."
+        success_msg: "Running on supported EL9 system"
+
+  tasks:
+    # Hostname and DNS configuration
+    - name: Set hostname to node.engatwork.com
+      ansible.builtin.hostname:
+        name: node.engatwork.com
+
+    - name: Update /etc/hosts with FQDN entries
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        regexp: '^{{ ansible_default_ipv4.address }}'
+        line: "{{ ansible_default_ipv4.address }} {{ ovirt_engine_fqdn }} node.engatwork.com node ovirt"
+        state: present
+
+    - name: Ensure localhost entries are correct
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        regexp: '^127\.0\.0\.1'
+        line: "127.0.0.1 localhost localhost.localdomain"
+        state: present
+
+    # SELinux - set to permissive
+    - name: Set SELinux to permissive
+      ansible.posix.selinux:
+        state: permissive
+        policy: targeted
+
+    # Time synchronization
+    - name: Configure chrony for time synchronization
+      ansible.builtin.template:
+        src: ../../templates/chrony.conf.j2
+        dest: /etc/chrony.conf
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Restart chronyd
+
+    - name: Enable and start chronyd
+      ansible.builtin.systemd:
+        name: chronyd
+        state: started
+        enabled: true
+
+    # oVirt repository setup per official docs
+    - name: Install oVirt 4.5 release package
+      ansible.builtin.dnf:
+        name: centos-release-ovirt45
+        state: present
+      register: ovirt_repo_result
+      ignore_errors: true
+
+    - name: Fallback - Install oVirt 4.5 release from URL
+      ansible.builtin.dnf:
+        name: "https://resources.ovirt.org/pub/yum-repo/ovirt-release45.rpm"
+        state: present
+        disable_gpg_check: true
+      when: ovirt_repo_result is failed
+
+    # Enable required module streams for EL9
+    - name: Enable javapackages-tools module
+      ansible.builtin.command: dnf module -y enable javapackages-tools
+      register: java_module
+      changed_when: "'Enabling' in java_module.stdout or java_module.rc == 0"
+      failed_when: false
+
+    - name: Enable pki-deps module
+      ansible.builtin.command: dnf module -y enable pki-deps
+      register: pki_module
+      changed_when: "'Enabling' in pki_module.stdout or pki_module.rc == 0"
+      failed_when: false
+
+    - name: Enable postgresql 12 module
+      ansible.builtin.command: dnf module -y enable postgresql:12
+      register: pg_module
+      changed_when: "'Enabling' in pg_module.stdout or pg_module.rc == 0"
+      failed_when: false
+
+    - name: Enable nodejs 14 module
+      ansible.builtin.command: dnf module -y enable nodejs:14
+      register: nodejs_module
+      changed_when: "'Enabling' in nodejs_module.stdout or nodejs_module.rc == 0"
+      failed_when: false
+
+    # Sync and update packages
+    - name: Run distro-sync
+      ansible.builtin.command: dnf distro-sync -y --nobest
+      register: distrosync
+      changed_when: "'Nothing to do' not in distrosync.stdout"
+
+    - name: Update all packages (excluding conflicting qpid-proton)
+      ansible.builtin.dnf:
+        name: "*"
+        state: latest
+        update_cache: true
+        exclude:
+          - qpid-proton-c
+          - python3-qpid-proton
+      register: dnf_update
+      ignore_errors: true
+
+    # Install base virtualization packages
+    - name: Install virtualization packages
+      ansible.builtin.dnf:
+        name:
+          - qemu-kvm
+          - libvirt
+          - virt-install
+          - virt-viewer
+          - nfs-utils
+          - cockpit
+          - cockpit-storaged
+          - cockpit-machines
+        state: present
+
+    - name: Enable and start libvirtd
+      ansible.builtin.systemd:
+        name: libvirtd
+        state: started
+        enabled: true
+
+    - name: Enable and start cockpit
+      ansible.builtin.systemd:
+        name: cockpit.socket
+        state: started
+        enabled: true
+
+    # Local Storage Directories Setup
+    # NFS-exported directories (for oVirt storage domains)
+    - name: Create ISO storage directory
+      ansible.builtin.file:
+        path: "{{ ovirt_iso_domain_path }}"
+        state: directory
+        owner: 36
+        group: 36
+        mode: '0755'
+      when: ovirt_iso_domain_enabled | default(false)
+
+    # NFS exports configuration
+    - name: Configure NFS export for ISO domain
+      ansible.builtin.lineinfile:
+        path: /etc/exports
+        line: "{{ ovirt_iso_domain_path }} *(rw,sync,no_subtree_check,no_root_squash,insecure,anonuid=36,anongid=36)"
+        create: true
+        owner: root
+        group: root
+        mode: '0644'
+      when: ovirt_iso_domain_enabled | default(false)
+      notify: Export NFS shares
+
+    - name: Enable and start NFS server
+      ansible.builtin.systemd:
+        name: nfs-server
+        state: started
+        enabled: true
+      when: ovirt_iso_domain_enabled | default(false)
+
+    # Firewall configuration per oVirt docs
+    - name: Configure firewall services for oVirt
+      ansible.posix.firewalld:
+        service: "{{ item }}"
+        permanent: true
+        state: enabled
+        immediate: true
+      loop:
+        - http
+        - https
+        - cockpit
+
+    - name: Configure NFS firewall services
+      ansible.posix.firewalld:
+        service: "{{ item }}"
+        permanent: true
+        state: enabled
+        immediate: true
+      loop:
+        - nfs
+        - nfs3
+        - mountd
+        - rpc-bind
+      when: ovirt_iso_domain_enabled | default(false)
+
+    - name: Open oVirt Engine ports
+      ansible.posix.firewalld:
+        port: "{{ item }}"
+        permanent: true
+        state: enabled
+        immediate: true
+      loop:
+        - "80/tcp"        # HTTP
+        - "443/tcp"       # HTTPS
+        - "6100/tcp"      # WebSocket Proxy
+        - "54323/tcp"     # ovirt-imageio
+        - "6642/tcp"      # OVN southbound DB
+        - "5432/tcp"      # PostgreSQL (local)
+        - "54321/tcp"     # VDSM
+        - "54322/tcp"     # imageio-proxy
+        - "16514/tcp"     # libvirt TLS
+        - "5900-6923/tcp" # VNC/SPICE consoles
+        - "7410/udp"      # kdump (optional)
+
+    - name: Ensure IPv6 is enabled (required by oVirt)
+      ansible.builtin.sysctl:
+        name: net.ipv6.conf.all.disable_ipv6
+        value: '0'
+        state: present
+        reload: true
+
+    - name: Display prep completion message
+      ansible.builtin.debug:
+        msg:
+          - "=============================================="
+          - "Host preparation complete!"
+          - "=============================================="
+          - "Hostname: node.engatwork.com"
+          - "Engine FQDN: {{ ovirt_engine_fqdn }}"
+          - ""
+          - "ISO Domain: {{ ovirt_iso_domain_path }}"
+          - ""
+          - "Next: Run install_engine.yml"
+          - "=============================================="
+
+  handlers:
+    - name: Restart chronyd
+      ansible.builtin.systemd:
+        name: chronyd
+        state: restarted
+
+    - name: Export NFS shares
+      ansible.builtin.command: exportfs -rav
