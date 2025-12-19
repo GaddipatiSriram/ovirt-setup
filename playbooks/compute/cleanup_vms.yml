@@ -1,0 +1,67 @@
+---
+# cleanup_vms.yml - Delete VMs created by deploy_vms.yml
+# Run: ansible-playbook -i inventory.ini cleanup_vms.yml
+#
+# Override with:
+#   ansible-playbook -i inventory.ini cleanup_vms.yml -e "vm_prefix=dev-app"
+#   ansible-playbook -i inventory.ini cleanup_vms.yml -e "vm_count=5"
+
+- name: Cleanup VMs
+  hosts: engine
+  become: true
+  gather_facts: false
+
+  vars:
+    # VM naming (must match deploy_vms.yml)
+    vm_prefix: "mgmt-core"
+    vm_count: 3
+
+  tasks:
+    # ==================== AUTHENTICATE ====================
+    - name: Obtain SSO token from oVirt Engine
+      ovirt.ovirt.ovirt_auth:
+        url: "https://{{ ovirt_engine_fqdn }}/ovirt-engine/api"
+        username: "admin@ovirt@internalsso"
+        password: "{{ ovirt_engine_admin_password }}"
+        insecure: true
+      register: ovirt_auth
+
+    # ==================== DISPLAY PLAN ====================
+    - name: Display cleanup plan
+      ansible.builtin.debug:
+        msg:
+          - "=============================================="
+          - "VM Cleanup Plan"
+          - "=============================================="
+          - "VMs to delete:"
+          - "{% for i in range(1, vm_count|int + 1) %}  - {{ vm_prefix }}-{{ '%02d' | format(i) }}\n{% endfor %}"
+          - "=============================================="
+
+    # ==================== DELETE VMs ====================
+    - name: Stop and delete VMs
+      ovirt.ovirt.ovirt_vm:
+        auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+        name: "{{ vm_prefix }}-{{ '%02d' | format(item) }}"
+        state: absent
+        wait: true
+      loop: "{{ range(1, vm_count|int + 1) | list }}"
+      loop_control:
+        label: "{{ vm_prefix }}-{{ '%02d' | format(item) }}"
+      register: deleted_vms
+      ignore_errors: true
+
+    # ==================== CLEANUP ====================
+    - name: Revoke SSO token
+      ovirt.ovirt.ovirt_auth:
+        state: absent
+        ovirt_auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+
+    # ==================== SUMMARY ====================
+    - name: Display cleanup summary
+      ansible.builtin.debug:
+        msg:
+          - "=============================================="
+          - "VM Cleanup Complete!"
+          - "=============================================="
+          - "Deleted {{ vm_count }} VMs with prefix '{{ vm_prefix }}'"
+          - "=============================================="

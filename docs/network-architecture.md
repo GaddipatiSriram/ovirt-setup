@@ -27,13 +27,13 @@ This document describes the simplified network architecture for the oVirt virtua
 │                         │      192.168.0.101 (WAN)        │                          │
 │                         ├─────────────────────────────────┤                          │
 │                         │  WAN ─────────── 192.168.0.101  │                          │
-│                         │  MGMT_CORE ───── 10.10.0.1      │                          │
-│                         │  MGMT_DEVOPS ─── 10.10.1.1      │                          │
-│                         │  MGMT_OBSERV ─── 10.10.2.1      │                          │
-│                         │  DEV_APPS ────── 10.20.0.1      │                          │
-│                         │  DEV_DATA ────── 10.20.1.1      │                          │
-│                         │  PROD_APPS ───── 10.30.0.1      │                          │
-│                         │  PROD_DATA ───── 10.30.1.1      │                          │
+│                         │  MGMT_CORE ───── 10.10.1.1      │                          │
+│                         │  MGMT_DEVOPS ─── 10.10.2.1      │                          │
+│                         │  MGMT_OBSERV ─── 10.10.3.1      │                          │
+│                         │  DEV_APPS ────── 10.20.1.1      │                          │
+│                         │  DEV_DATA ────── 10.20.2.1      │                          │
+│                         │  PROD_APPS ───── 10.30.1.1      │                          │
+│                         │  PROD_DATA ───── 10.30.2.1      │                          │
 │                         └───────────────┬─────────────────┘                          │
 │                                         │                                            │
 │       ┌─────────────────────────────────┼─────────────────────────────────┐          │
@@ -51,7 +51,7 @@ This document describes the simplified network architecture for the oVirt virtua
 │  │                     │    │                     │    │                     │      │
 │  │ ┌─────────────────┐ │    │ ┌─────────────────┐ │    │ ┌─────────────────┐ │      │
 │  │ │ Mgmt-Core       │ │    │ │ Dev-Apps        │ │    │ │ Prod-Apps       │ │      │
-│  │ │ 10.10.0.0/24    │ │    │ │ 10.20.0.0/24    │ │    │ │ 10.30.0.0/24    │ │      │
+│  │ │ 10.10.1.0/24    │ │    │ │ 10.20.1.0/24    │ │    │ │ 10.30.1.0/24    │ │      │
 │  │ │ VLAN 10         │ │    │ │ VLAN 20         │ │    │ │ VLAN 30         │ │      │
 │  │ │ DNS, NTP, LDAP  │ │    │ │ Web, App, API   │ │    │ │ Web, App, API   │ │      │
 │  │ │ Bastion, VPN    │ │    │ │ K8s Workers     │ │    │ │ K8s Workers     │ │      │
@@ -59,7 +59,7 @@ This document describes the simplified network architecture for the oVirt virtua
 │  │                     │    │                     │    │                     │      │
 │  │ ┌─────────────────┐ │    │ ┌─────────────────┐ │    │ ┌─────────────────┐ │      │
 │  │ │ Mgmt-DevOps     │ │    │ │ Dev-Data        │ │    │ │ Prod-Data       │ │      │
-│  │ │ 10.10.1.0/24    │ │    │ │ 10.20.1.0/24    │ │    │ │ 10.30.1.0/24    │ │      │
+│  │ │ 10.10.2.0/24    │ │    │ │ 10.20.2.0/24    │ │    │ │ 10.30.2.0/24    │ │      │
 │  │ │ VLAN 11         │ │    │ │ VLAN 21         │ │    │ │ VLAN 31         │ │      │
 │  │ │ ArgoCD, Jenkins │ │    │ │ PostgreSQL      │ │    │ │ PostgreSQL      │ │      │
 │  │ │ GitLab, Harbor  │ │    │ │ Redis, Kafka    │ │    │ │ Redis, Kafka    │ │      │
@@ -67,7 +67,7 @@ This document describes the simplified network architecture for the oVirt virtua
 │  │                     │    │ └─────────────────┘ │    │ └─────────────────┘ │      │
 │  │ ┌─────────────────┐ │    │                     │    │                     │      │
 │  │ │ Mgmt-Observ     │ │    │                     │    │                     │      │
-│  │ │ 10.10.2.0/24    │ │    │                     │    │                     │      │
+│  │ │ 10.10.3.0/24    │ │    │                     │    │                     │      │
 │  │ │ VLAN 12         │ │    │                     │    │                     │      │
 │  │ │ Grafana, Prom   │ │    │                     │    │                     │      │
 │  │ │ Loki, Tempo     │ │    │                     │    │                     │      │
@@ -175,26 +175,26 @@ Prod-App-VM1 ───▶ pfSense ───▶ Prod-App-VM2
 
 | pfSense Name | vtnet  | oVirt NIC | oVirt Network    | IP Address        | Purpose                    |
 |--------------|--------|-----------|------------------|-------------------|----------------------------|
-| WAN          | vtnet0 | nic1      | ovirtmgmt        | 192.168.0.101/24  | Internet uplink            |
-| MGMT_CORE    | vtnet1 | nic2      | Mgmt-Core-Net    | 10.10.0.1/24      | Core infrastructure        |
-| MGMT_DEVOPS  | vtnet2 | nic3      | Mgmt-DevOps-Net  | 10.10.1.1/24      | CI/CD, GitOps              |
-| MGMT_OBSERV  | vtnet3 | nic4      | Mgmt-Observ-Net  | 10.10.2.1/24      | Monitoring, Logging        |
-| DEV_APPS     | vtnet4 | nic5      | Dev-Apps-Net     | 10.20.0.1/24      | Dev applications           |
-| DEV_DATA     | vtnet5 | nic6      | Dev-Data-Net     | 10.20.1.1/24      | Dev databases              |
-| PROD_APPS    | vtnet6 | nic7      | Prod-Apps-Net    | 10.30.0.1/24      | Prod applications          |
-| PROD_DATA    | vtnet7 | nic8      | Prod-Data-Net    | 10.30.1.1/24      | Prod databases             |
+| WAN          | vtnet0 | nic1      | ovirtmgmt        | 192.168.0.101/24  | Internet uplink (DHCP)     |
+| MGMT_CORE    | vtnet1 | nic2      | Mgmt-Core-Net    | 10.10.1.1/24      | Core infrastructure        |
+| MGMT_DEVOPS  | vtnet2 | nic3      | Mgmt-DevOps-Net  | 10.10.2.1/24      | CI/CD, GitOps              |
+| MGMT_OBSERV  | vtnet3 | nic4      | Mgmt-Observ-Net  | 10.10.3.1/24      | Monitoring, Logging        |
+| DEV_APPS     | vtnet4 | nic5      | Dev-Apps-Net     | 10.20.1.1/24      | Dev applications           |
+| DEV_DATA     | vtnet5 | nic6      | Dev-Data-Net     | 10.20.2.1/24      | Dev databases              |
+| PROD_APPS    | vtnet6 | nic7      | Prod-Apps-Net    | 10.30.1.1/24      | Prod applications          |
+| PROD_DATA    | vtnet7 | nic8      | Prod-Data-Net    | 10.30.2.1/24      | Prod databases             |
 
 ### Network to VLAN Mapping
 
-| Network          | VLAN | Subnet         | DHCP Range          | Purpose                              |
-|------------------|------|----------------|---------------------|--------------------------------------|
-| Mgmt-Core-Net    | 10   | 10.10.0.0/24   | 10.10.0.100-200     | DNS, NTP, LDAP, Bastion, VPN         |
-| Mgmt-DevOps-Net  | 11   | 10.10.1.0/24   | 10.10.1.100-200     | ArgoCD, Jenkins, GitLab, Harbor      |
-| Mgmt-Observ-Net  | 12   | 10.10.2.0/24   | 10.10.2.100-200     | Grafana, Prometheus, Loki, Tempo     |
-| Dev-Apps-Net     | 20   | 10.20.0.0/24   | 10.20.0.100-200     | Web, App, API servers, K8s workers   |
-| Dev-Data-Net     | 21   | 10.20.1.0/24   | 10.20.1.100-200     | PostgreSQL, Redis, Kafka, ES         |
-| Prod-Apps-Net    | 30   | 10.30.0.0/24   | 10.30.0.100-200     | Web, App, API servers, K8s workers   |
-| Prod-Data-Net    | 31   | 10.30.1.0/24   | 10.30.1.100-200     | PostgreSQL, Redis, Kafka, ES         |
+| Network          | VLAN | Subnet         | DHCP Range            | Purpose                              |
+|------------------|------|----------------|----------------------|--------------------------------------|
+| Mgmt-Core-Net    | 10   | 10.10.1.0/24   | 10.10.1.100-200      | DNS, NTP, LDAP, Bastion, VPN         |
+| Mgmt-DevOps-Net  | 11   | 10.10.2.0/24   | 10.10.2.100-200      | ArgoCD, Jenkins, GitLab, Harbor      |
+| Mgmt-Observ-Net  | 12   | 10.10.3.0/24   | 10.10.3.100-200      | Grafana, Prometheus, Loki, Tempo     |
+| Dev-Apps-Net     | 20   | 10.20.1.0/24   | 10.20.1.100-200      | Web, App, API servers, K8s workers   |
+| Dev-Data-Net     | 21   | 10.20.2.0/24   | 10.20.2.100-200      | PostgreSQL, Redis, Kafka, ES         |
+| Prod-Apps-Net    | 30   | 10.30.1.0/24   | 10.30.1.100-200      | Web, App, API servers, K8s workers   |
+| Prod-Data-Net    | 31   | 10.30.2.0/24   | 10.30.2.100-200      | PostgreSQL, Redis, Kafka, ES         |
 
 ### Static IP Reservations (per network)
 

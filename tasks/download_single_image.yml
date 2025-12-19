@@ -40,11 +40,12 @@
 
     - name: "Parse virtual size"
       ansible.builtin.set_fact:
-        virtual_size: "{{ (qemu_info.stdout | from_json)['virtual-size'] }}"
+        virtual_size_bytes: "{{ (qemu_info.stdout | from_json)['virtual-size'] }}"
+        virtual_size_gib: "{{ ((qemu_info.stdout | from_json)['virtual-size'] | int / 1024 / 1024 / 1024) | round(0) | int }}GiB"
 
     - name: "Display {{ current_image.name }} info"
       ansible.builtin.debug:
-        msg: "Downloaded {{ current_image.filename }} ({{ (image_stat.stat.size / 1024 / 1024) | round(1) }} MB actual, {{ (virtual_size | int / 1024 / 1024 / 1024) | round(1) }} GB virtual)"
+        msg: "Downloaded {{ current_image.filename }} ({{ (image_stat.stat.size / 1024 / 1024) | round(1) }} MB actual, {{ virtual_size_gib }} virtual)"
 
     - name: "Upload {{ current_image.name }} to oVirt"
       ovirt.ovirt.ovirt_disk:
@@ -53,7 +54,7 @@
         description: "{{ current_image.description }}"
         storage_domain: "{{ storage_domain }}"
         upload_image_path: "{{ download_dir }}/{{ current_image.filename }}"
-        size: "{{ virtual_size }}"
+        size: "{{ virtual_size_gib }}"
         format: cow
         content_type: data
         bootable: true

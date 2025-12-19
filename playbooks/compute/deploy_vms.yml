@@ -5,6 +5,7 @@
 # Override with:
 #   ansible-playbook -i inventory.ini deploy_vms.yml -e "vm_size=large"
 #   ansible-playbook -i inventory.ini deploy_vms.yml -e "vm_count=5"
+#   ansible-playbook -i inventory.ini deploy_vms.yml -e "network_name=Dev-Apps-Net vm_prefix=dev-app"
 
 - name: Deploy VMs from Template
   hosts: engine
@@ -20,7 +21,7 @@
     storage_domain: "data_lun"
 
     # VM naming
-    vm_prefix: "fedora-mgmt"
+    vm_prefix: "mgmt-core"
     vm_count: 3
 
     # VM size: small, medium, large
@@ -43,6 +44,10 @@
         memory_guaranteed: 2GiB
         cpu_cores: 4
         disk_size: 80GiB
+
+    # Network (default from template, or override)
+    # Options: Mgmt-Core-Net, Mgmt-DevOps-Net, Mgmt-Observ-Net, Dev-Apps-Net, Dev-Data-Net, Prod-Apps-Net, Prod-Data-Net
+    network_name: ""
 
     # Cloud-init settings
     root_password: "unix"
@@ -77,6 +82,7 @@
           - "  Memory: {{ size_config.memory }}"
           - "  CPU: {{ size_config.cpu_cores }} cores"
           - "  Disk: {{ size_config.disk_size }}"
+          - "  Network: {{ network_name | default('(from template)', true) }}"
           - ""
           - "VMs to create:"
           - "{% for i in range(1, vm_count|int + 1) %}  - {{ vm_prefix }}-{{ '%02d' | format(i) }}\n{% endfor %}"
@@ -142,6 +148,21 @@
         label: "{{ vm_prefix }}-{{ '%02d' | format(item) }}"
       register: created_vms
 
+    # ==================== CONFIGURE NETWORK ====================
+    - name: Configure VM network
+      ovirt.ovirt.ovirt_nic:
+        auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+        vm: "{{ vm_prefix }}-{{ '%02d' | format(item) }}"
+        name: "nic1"
+        profile: "{{ network_name }}"
+        network: "{{ network_name }}"
+        interface: virtio
+        state: present
+      loop: "{{ range(1, vm_count|int + 1) | list }}"
+      loop_control:
+        label: "{{ vm_prefix }}-{{ '%02d' | format(item) }}"
+      when: network_name | length > 0
+
     # ==================== START VMs WITH INIT ====================
     - name: Start VMs with cloud-init
       ovirt.ovirt.ovirt_vm:
@@ -185,6 +206,8 @@
           - ""
           - "Created {{ vm_count }} VMs:"
           - "{% for vm in vm_info.ovirt_vms %}  - {{ vm.name }}: {{ vm.status }}{% if vm.reported_devices %} ({{ vm.reported_devices[0].ips[0].address | default('no IP yet') }}){% endif %}\n{% endfor %}"
+          - ""
+          - "Network: {{ network_name | default('(from template)', true) }}"
           - ""
           - "Credentials:"
           - "  root / {{ root_password }}"
