@@ -3,7 +3,7 @@
 # Run: ansible-playbook -i inventory.ini clear-event.yaml
 
 - name: Clear oVirt Events
-  hosts: engine
+  hosts: ovirt
   become: true
   gather_facts: false
 

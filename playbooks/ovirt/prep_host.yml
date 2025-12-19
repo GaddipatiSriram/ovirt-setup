@@ -27,7 +27,7 @@
       ansible.builtin.lineinfile:
         path: /etc/hosts
         regexp: '^{{ ansible_default_ipv4.address }}'
-        line: "{{ ansible_default_ipv4.address }} {{ ovirt_engine_fqdn }} node.engatwork.com node ovirt"
+        line: "{{ ansible_default_ipv4.address }} {{ ovirt_engine_fqdn }} {{ ovirt_node_fqdn }} node ovirt"
         state: present
 
     - name: Ensure localhost entries are correct
