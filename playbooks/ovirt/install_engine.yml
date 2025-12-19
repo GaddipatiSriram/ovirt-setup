@@ -57,6 +57,18 @@
         var: engine_setup_result.stdout_lines
       when: engine_setup_result is defined and engine_setup_result.stdout_lines is defined
 
+    # Configure JVM heap size (override auto-calculated value)
+    - name: Configure oVirt Engine JVM heap size
+      ansible.builtin.copy:
+        dest: /etc/ovirt-engine/engine.conf.d/20-custom-heap.conf
+        content: |
+          ENGINE_HEAP_MIN="{{ ovirt_engine_heap_min }}"
+          ENGINE_HEAP_MAX="{{ ovirt_engine_heap_max }}"
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Restart ovirt-engine
+
     # Ensure services are running
     - name: Ensure ovirt-engine service is enabled and started
       ansible.builtin.systemd:
@@ -120,3 +132,9 @@
           - "=============================================="
           - "Next: Run post_install.yml to add host and storage"
           - "=============================================="
+
+  handlers:
+    - name: Restart ovirt-engine
+      ansible.builtin.systemd:
+        name: ovirt-engine
+        state: restarted

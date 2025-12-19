@@ -8,6 +8,9 @@ ovirt_engine_admin_password: "unix"
 host_root_password: "unix"
 
 # oVirt Engine setup options
+ovirt_engine_heap_min: "4096M"
+ovirt_engine_heap_max: "16384M"
+
 ovirt_engine_db_host: "localhost"
 ovirt_engine_db_port: 5432
 ovirt_engine_db_name: "engine"
