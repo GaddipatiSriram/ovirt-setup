@@ -1,0 +1,247 @@
+---
+# configure_pfsense.yml - Configure pfSense firewall using pfsensible.core
+# Run: ansible-playbook playbooks/network/pfsense/configure_pfsense.yml
+#
+# Prerequisites:
+#   - pfSense VM running with WebConfigurator enabled
+#   - ansible-galaxy collection install pfsensible.core
+#
+# Usage:
+#   ansible-playbook playbooks/network/pfsense/configure_pfsense.yml \
+#     -e pfsense_host=192.168.0.101 \
+#     -e pfsense_user=admin \
+#     -e pfsense_password=pfsense
+
+- name: Configure pfSense Firewall
+  hosts: localhost
+  gather_facts: false
+  connection: local
+
+  vars_files:
+    - vars/pfsense_config.yml
+
+  vars:
+    # pfSense connection settings (override via -e or group_vars)
+    pfsense_host: "192.168.0.101"
+    pfsense_user: "admin"
+    pfsense_password: "pfsense"
+    pfsense_configfile: "/cf/conf/config.xml"
+
+  module_defaults:
+    group/pfsensible.core.pfsense:
+      host: "{{ pfsense_host }}"
+      user: "{{ pfsense_user }}"
+      password: "{{ pfsense_password }}"
+      configfile: "{{ pfsense_configfile }}"
+
+  tasks:
+    # =========================================================================
+    # PHASE 1: SYSTEM CONFIGURATION
+    # =========================================================================
+    - name: "PHASE 1: System Configuration"
+      tags: [system]
+      block:
+        - name: Configure system settings
+          pfsensible.core.pfsense_setup:
+            hostname: "{{ pfsense_hostname }}"
+            domain: "{{ pfsense_domain }}"
+            timezone: "{{ pfsense_timezone }}"
+            dns_addresses: "{{ pfsense_dns_servers | join(' ') }}"
+            dnsallowoverride: false
+
+        - name: Configure DNS Resolver
+          pfsensible.core.pfsense_dns_resolver:
+            enable: true
+            dnssec: false
+            forwarding: true
+            regdhcp: true
+            regdhcpstatic: true
+
+    # =========================================================================
+    # PHASE 2: INTERFACE CONFIGURATION
+    # =========================================================================
+    - name: "PHASE 2: Interface Configuration"
+      tags: [interfaces]
+      block:
+        - name: Configure WAN interface
+          pfsensible.core.pfsense_interface:
+            interface: "{{ pfsense_wan.interface }}"
+            descr: "{{ pfsense_wan.descr }}"
+            ipv4_type: "{{ pfsense_wan.ipv4_type }}"
+            ipv4_address: "{{ pfsense_wan.ipv4_address }}"
+            ipv4_prefixlen: "{{ pfsense_wan.ipv4_prefixlen }}"
+            ipv4_gateway: "{{ pfsense_wan.ipv4_gateway }}"
+            blockpriv: "{{ pfsense_wan.blockpriv }}"
+            blockbogons: "{{ pfsense_wan.blockbogons }}"
+            enable: true
+            state: present
+
+        - name: Configure WAN gateway
+          pfsensible.core.pfsense_gateway:
+            name: "{{ pfsense_wan_gateway.name }}"
+            interface: "{{ pfsense_wan_gateway.interface }}"
+            gateway: "{{ pfsense_wan_gateway.gateway }}"
+            ipprotocol: inet
+            state: present
+
+        - name: Set default gateway
+          pfsensible.core.pfsense_default_gateway:
+            gateway: "{{ pfsense_wan_gateway.name }}"
+
+        - name: Configure LAN interfaces
+          pfsensible.core.pfsense_interface:
+            interface: "{{ item.interface }}"
+            descr: "{{ item.descr }}"
+            ipv4_type: static
+            ipv4_address: "{{ item.ipv4_address }}"
+            ipv4_prefixlen: "{{ item.ipv4_prefixlen }}"
+            enable: true
+            state: present
+          loop: "{{ pfsense_interfaces }}"
+          loop_control:
+            label: "{{ item.descr }} ({{ item.ipv4_address }}/{{ item.ipv4_prefixlen }})"
+
+    # =========================================================================
+    # PHASE 3: INTERFACE GROUPS
+    # =========================================================================
+    - name: "PHASE 3: Interface Groups"
+      tags: [groups]
+      block:
+        - name: Create interface groups
+          pfsensible.core.pfsense_interface_group:
+            name: "{{ item.name }}"
+            descr: "{{ item.descr }}"
+            members: "{{ item.members }}"
+            state: present
+          loop: "{{ pfsense_interface_groups }}"
+          loop_control:
+            label: "{{ item.name }}"
+
+    # =========================================================================
+    # PHASE 4: DHCP SERVERS
+    # =========================================================================
+    - name: "PHASE 4: DHCP Configuration"
+      tags: [dhcp]
+      block:
+        - name: Configure DHCP servers on LAN interfaces
+          pfsensible.core.pfsense_dhcp_server:
+            interface: "{{ item.interface }}"
+            enable: true
+            range_from: "{{ item.range_from }}"
+            range_to: "{{ item.range_to }}"
+            domain: "{{ item.domain }}"
+            defaultleasetime: 86400
+            maxleasetime: 172800
+            state: present
+          loop: "{{ pfsense_dhcp_servers }}"
+          loop_control:
+            label: "{{ item.interface }} ({{ item.range_from }} - {{ item.range_to }})"
+
+    # =========================================================================
+    # PHASE 5: FIREWALL ALIASES
+    # =========================================================================
+    - name: "PHASE 5: Firewall Aliases"
+      tags: [aliases]
+      block:
+        - name: Create firewall aliases
+          pfsensible.core.pfsense_alias:
+            name: "{{ item.name }}"
+            type: "{{ item.type }}"
+            descr: "{{ item.descr }}"
+            address: "{{ item.address | join(' ') }}"
+            state: present
+          loop: "{{ pfsense_aliases }}"
+          loop_control:
+            label: "{{ item.name }} ({{ item.type }})"
+
+    # =========================================================================
+    # PHASE 6: FIREWALL RULES
+    # =========================================================================
+    - name: "PHASE 6: Firewall Rules"
+      tags: [rules]
+      block:
+        - name: Create firewall rules
+          pfsensible.core.pfsense_rule:
+            name: "{{ item.name }}"
+            interface: "{{ item.interface }}"
+            action: "{{ item.action }}"
+            ipprotocol: inet
+            protocol: "{{ item.protocol | default('any') }}"
+            source: "{{ item.source }}"
+            destination: "{{ item.destination }}"
+            destination_port: "{{ item.destination_port | default(omit) }}"
+            descr: "{{ item.descr }}"
+            state: present
+          loop: "{{ pfsense_firewall_rules }}"
+          loop_control:
+            label: "{{ item.name }}"
+
+    # =========================================================================
+    # PHASE 7: NAT CONFIGURATION
+    # =========================================================================
+    - name: "PHASE 7: NAT Configuration"
+      tags: [nat]
+      block:
+        - name: Configure outbound NAT for Management networks
+          pfsensible.core.pfsense_nat_outbound:
+            descr: "NAT Management Networks"
+            interface: "wan"
+            source: "ManagementNets"
+            destination: "any"
+            target: ""
+            state: present
+
+        - name: Configure outbound NAT for Development networks
+          pfsensible.core.pfsense_nat_outbound:
+            descr: "NAT Development Networks"
+            interface: "wan"
+            source: "DevelopmentNets"
+            destination: "any"
+            target: ""
+            state: present
+
+        - name: Configure outbound NAT for Production networks
+          pfsensible.core.pfsense_nat_outbound:
+            descr: "NAT Production Networks"
+            interface: "wan"
+            source: "ProductionNets"
+            destination: "any"
+            target: ""
+            state: present
+
+    # =========================================================================
+    # SUMMARY
+    # =========================================================================
+    - name: Display configuration summary
+      tags: [always]
+      ansible.builtin.debug:
+        msg:
+          - "=============================================="
+          - "pfSense Configuration Complete"
+          - "=============================================="
+          - ""
+          - "System:"
+          - "  Hostname: {{ pfsense_hostname }}.{{ pfsense_domain }}"
+          - "  DNS: {{ pfsense_dns_servers | join(', ') }}"
+          - ""
+          - "Interfaces:"
+          - "  WAN:         {{ pfsense_wan.ipv4_address }}/{{ pfsense_wan.ipv4_prefixlen }} (GW: {{ pfsense_wan_gateway.gateway }})"
+          - "  MGMT_CORE:   10.10.0.1/24"
+          - "  MGMT_DEVOPS: 10.10.1.1/24"
+          - "  MGMT_OBSERV: 10.10.2.1/24"
+          - "  DEV_APPS:    10.20.0.1/24"
+          - "  DEV_DATA:    10.20.1.1/24"
+          - "  PROD_APPS:   10.30.0.1/24"
+          - "  PROD_DATA:   10.30.1.1/24"
+          - ""
+          - "Interface Groups:"
+          - "  Management:  mgmt_core, mgmt_devops, mgmt_observ"
+          - "  Development: dev_apps, dev_data"
+          - "  Production:  prod_apps, prod_data"
+          - ""
+          - "DHCP: Enabled on all LAN interfaces (.100-.200)"
+          - "Firewall: {{ pfsense_firewall_rules | length }} rules configured"
+          - "NAT: Outbound NAT for all internal networks"
+          - ""
+          - "Access WebGUI: https://{{ pfsense_host }}"
+          - "=============================================="

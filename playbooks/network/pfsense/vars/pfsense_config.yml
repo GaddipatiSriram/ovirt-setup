@@ -1,0 +1,229 @@
+---
+# pfSense Configuration Variables
+# Used by configure_pfsense.yml playbook
+
+# =============================================================================
+# SYSTEM SETTINGS
+# =============================================================================
+pfsense_hostname: "pfsense"
+pfsense_domain: "engatwork.com"
+pfsense_timezone: "America/New_York"
+pfsense_dns_servers:
+  - "8.8.8.8"
+  - "8.8.4.4"
+
+# =============================================================================
+# WAN CONFIGURATION
+# =============================================================================
+pfsense_wan:
+  interface: "vtnet0"
+  descr: "WAN"
+  ipv4_type: "static"
+  ipv4_address: "192.168.0.101"
+  ipv4_prefixlen: 24
+  ipv4_gateway: "WAN_GW"
+  blockpriv: true
+  blockbogons: true
+
+pfsense_wan_gateway:
+  name: "WAN_GW"
+  interface: "wan"
+  gateway: "192.168.0.1"
+  default: true
+
+# =============================================================================
+# LAN INTERFACES
+# =============================================================================
+pfsense_interfaces:
+  - name: "mgmt_core"
+    interface: "vtnet1"
+    descr: "MGMT_CORE"
+    ipv4_address: "10.10.0.1"
+    ipv4_prefixlen: 24
+
+  - name: "mgmt_devops"
+    interface: "vtnet2"
+    descr: "MGMT_DEVOPS"
+    ipv4_address: "10.10.1.1"
+    ipv4_prefixlen: 24
+
+  - name: "mgmt_observ"
+    interface: "vtnet3"
+    descr: "MGMT_OBSERV"
+    ipv4_address: "10.10.2.1"
+    ipv4_prefixlen: 24
+
+  - name: "dev_apps"
+    interface: "vtnet4"
+    descr: "DEV_APPS"
+    ipv4_address: "10.20.0.1"
+    ipv4_prefixlen: 24
+
+  - name: "dev_data"
+    interface: "vtnet5"
+    descr: "DEV_DATA"
+    ipv4_address: "10.20.1.1"
+    ipv4_prefixlen: 24
+
+  - name: "prod_apps"
+    interface: "vtnet6"
+    descr: "PROD_APPS"
+    ipv4_address: "10.30.0.1"
+    ipv4_prefixlen: 24
+
+  - name: "prod_data"
+    interface: "vtnet7"
+    descr: "PROD_DATA"
+    ipv4_address: "10.30.1.1"
+    ipv4_prefixlen: 24
+
+# =============================================================================
+# INTERFACE GROUPS
+# =============================================================================
+pfsense_interface_groups:
+  - name: "Management"
+    descr: "Management Networks"
+    members: ["mgmt_core", "mgmt_devops", "mgmt_observ"]
+
+  - name: "Development"
+    descr: "Development Networks"
+    members: ["dev_apps", "dev_data"]
+
+  - name: "Production"
+    descr: "Production Networks"
+    members: ["prod_apps", "prod_data"]
+
+  - name: "AllLANs"
+    descr: "All Internal Networks"
+    members: ["mgmt_core", "mgmt_devops", "mgmt_observ", "dev_apps", "dev_data", "prod_apps", "prod_data"]
+
+# =============================================================================
+# DHCP SERVERS
+# =============================================================================
+pfsense_dhcp_servers:
+  - interface: "mgmt_core"
+    range_from: "10.10.0.100"
+    range_to: "10.10.0.200"
+    domain: "mgmt.engatwork.com"
+
+  - interface: "mgmt_devops"
+    range_from: "10.10.1.100"
+    range_to: "10.10.1.200"
+    domain: "devops.engatwork.com"
+
+  - interface: "mgmt_observ"
+    range_from: "10.10.2.100"
+    range_to: "10.10.2.200"
+    domain: "observ.engatwork.com"
+
+  - interface: "dev_apps"
+    range_from: "10.20.0.100"
+    range_to: "10.20.0.200"
+    domain: "dev.engatwork.com"
+
+  - interface: "dev_data"
+    range_from: "10.20.1.100"
+    range_to: "10.20.1.200"
+    domain: "devdata.engatwork.com"
+
+  - interface: "prod_apps"
+    range_from: "10.30.0.100"
+    range_to: "10.30.0.200"
+    domain: "prod.engatwork.com"
+
+  - interface: "prod_data"
+    range_from: "10.30.1.100"
+    range_to: "10.30.1.200"
+    domain: "proddata.engatwork.com"
+
+# =============================================================================
+# FIREWALL ALIASES
+# =============================================================================
+pfsense_aliases:
+  - name: "RFC1918"
+    type: "network"
+    descr: "Private IPv4 Address Space"
+    address: ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
+
+  - name: "ManagementNets"
+    type: "network"
+    descr: "Management Networks"
+    address: ["10.10.0.0/24", "10.10.1.0/24", "10.10.2.0/24"]
+
+  - name: "DevelopmentNets"
+    type: "network"
+    descr: "Development Networks"
+    address: ["10.20.0.0/24", "10.20.1.0/24"]
+
+  - name: "ProductionNets"
+    type: "network"
+    descr: "Production Networks"
+    address: ["10.30.0.0/24", "10.30.1.0/24"]
+
+  - name: "WebPorts"
+    type: "port"
+    descr: "HTTP/HTTPS ports"
+    address: ["80", "443"]
+
+  - name: "DatabasePorts"
+    type: "port"
+    descr: "Database ports"
+    address: ["5432", "3306", "27017", "6379", "9200"]
+
+# =============================================================================
+# FIREWALL RULES
+# =============================================================================
+pfsense_firewall_rules:
+  # Management - Allow all outbound
+  - name: "MGMT_Allow_Out"
+    interface: "Management"
+    action: "pass"
+    source: "any"
+    destination: "any"
+    descr: "Allow all from Management"
+
+  # Dev Apps - Allow outbound
+  - name: "DEV_APPS_Allow_Out"
+    interface: "dev_apps"
+    action: "pass"
+    source: "dev_apps"
+    destination: "any"
+    descr: "Allow Dev Apps outbound"
+
+  # Dev Data - Block internet, allow internal
+  - name: "DEV_DATA_Allow_Internal"
+    interface: "dev_data"
+    action: "pass"
+    source: "dev_data"
+    destination: "RFC1918"
+    descr: "Allow Dev Data to internal only"
+
+  # Prod Apps - Allow outbound, block to Dev
+  - name: "PROD_APPS_Block_Dev"
+    interface: "prod_apps"
+    action: "block"
+    source: "prod_apps"
+    destination: "DevelopmentNets"
+    descr: "Block Prod to Dev"
+
+  - name: "PROD_APPS_Allow_Out"
+    interface: "prod_apps"
+    action: "pass"
+    source: "prod_apps"
+    destination: "any"
+    descr: "Allow Prod Apps outbound"
+
+  # Prod Data - Block internet and Dev
+  - name: "PROD_DATA_Allow_Internal"
+    interface: "prod_data"
+    action: "pass"
+    source: "prod_data"
+    destination: "RFC1918"
+    descr: "Allow Prod Data to internal only"
+
+  - name: "PROD_DATA_Block_Dev"
+    interface: "prod_data"
+    action: "block"
+    source: "prod_data"
+    destination: "DevelopmentNets"
+    descr: "Block Prod Data to Dev"
