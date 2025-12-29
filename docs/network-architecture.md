@@ -1,12 +1,12 @@
-# Network Architecture (Simplified)
+# Network Architecture (3-Tier)
 
 ## Overview
 
-This document describes the simplified network architecture for the oVirt virtualization environment.
+This document describes the 3-tier network architecture for the oVirt virtualization environment.
 - **3 Management Networks** - Core infrastructure, DevOps, Observability
-- **2 Development Networks** - Apps and Data
-- **2 Production Networks** - Apps and Data
-- **Total: 7 networks + WAN = 8 pfSense interfaces**
+- **3 Development Networks** - Web, Apps, and Data
+- **3 Production Networks** - Web, Apps, and Data
+- **Total: 9 networks + WAN = 10 pfSense interfaces**
 
 ## Network Diagram
 
@@ -30,10 +30,12 @@ This document describes the simplified network architecture for the oVirt virtua
 │                         │  MGMT_CORE ───── 10.10.1.1      │                          │
 │                         │  MGMT_DEVOPS ─── 10.10.2.1      │                          │
 │                         │  MGMT_OBSERV ─── 10.10.3.1      │                          │
-│                         │  DEV_APPS ────── 10.20.1.1      │                          │
-│                         │  DEV_DATA ────── 10.20.2.1      │                          │
-│                         │  PROD_APPS ───── 10.30.1.1      │                          │
-│                         │  PROD_DATA ───── 10.30.2.1      │                          │
+│                         │  DEV_WEB ─────── 10.20.1.1      │                          │
+│                         │  DEV_APPS ────── 10.20.2.1      │                          │
+│                         │  DEV_DATA ────── 10.20.3.1      │                          │
+│                         │  PROD_WEB ────── 10.30.1.1      │                          │
+│                         │  PROD_APPS ───── 10.30.2.1      │                          │
+│                         │  PROD_DATA ───── 10.30.3.1      │                          │
 │                         └───────────────┬─────────────────┘                          │
 │                                         │                                            │
 │       ┌─────────────────────────────────┼─────────────────────────────────┐          │
@@ -46,32 +48,35 @@ This document describes the simplified network architecture for the oVirt virtua
 │         │                               │                               │            │
 │         ▼                               ▼                               ▼            │
 │  ┌─────────────────────┐    ┌─────────────────────┐    ┌─────────────────────┐      │
-│  │ MANAGEMENT (3 nets) │    │ DEVELOPMENT (2 nets)│    │ PRODUCTION (2 nets) │      │
+│  │ MANAGEMENT (3 nets) │    │ DEVELOPMENT (3 nets)│    │ PRODUCTION (3 nets) │      │
 │  ├─────────────────────┤    ├─────────────────────┤    ├─────────────────────┤      │
 │  │                     │    │                     │    │                     │      │
 │  │ ┌─────────────────┐ │    │ ┌─────────────────┐ │    │ ┌─────────────────┐ │      │
-│  │ │ Mgmt-Core       │ │    │ │ Dev-Apps        │ │    │ │ Prod-Apps       │ │      │
+│  │ │ Mgmt-Core       │ │    │ │ Dev-Web         │ │    │ │ Prod-Web        │ │      │
 │  │ │ 10.10.1.0/24    │ │    │ │ 10.20.1.0/24    │ │    │ │ 10.30.1.0/24    │ │      │
 │  │ │ VLAN 10         │ │    │ │ VLAN 20         │ │    │ │ VLAN 30         │ │      │
-│  │ │ DNS, NTP, LDAP  │ │    │ │ Web, App, API   │ │    │ │ Web, App, API   │ │      │
-│  │ │ Bastion, VPN    │ │    │ │ K8s Workers     │ │    │ │ K8s Workers     │ │      │
+│  │ │ DNS, NTP, LDAP  │ │    │ │ Ingress, nginx  │ │    │ │ Ingress, nginx  │ │      │
+│  │ │ Bastion, VPN    │ │    │ │ HAProxy, CDN    │ │    │ │ HAProxy, CDN    │ │      │
 │  │ └─────────────────┘ │    │ └─────────────────┘ │    │ └─────────────────┘ │      │
-│  │                     │    │                     │    │                     │      │
-│  │ ┌─────────────────┐ │    │ ┌─────────────────┐ │    │ ┌─────────────────┐ │      │
-│  │ │ Mgmt-DevOps     │ │    │ │ Dev-Data        │ │    │ │ Prod-Data       │ │      │
-│  │ │ 10.10.2.0/24    │ │    │ │ 10.20.2.0/24    │ │    │ │ 10.30.2.0/24    │ │      │
-│  │ │ VLAN 11         │ │    │ │ VLAN 21         │ │    │ │ VLAN 31         │ │      │
-│  │ │ ArgoCD, Jenkins │ │    │ │ PostgreSQL      │ │    │ │ PostgreSQL      │ │      │
-│  │ │ GitLab, Harbor  │ │    │ │ Redis, Kafka    │ │    │ │ Redis, Kafka    │ │      │
-│  │ └─────────────────┘ │    │ │ Elasticsearch   │ │    │ │ Elasticsearch   │ │      │
+│  │                     │    │         │           │    │         │           │      │
+│  │ ┌─────────────────┐ │    │         ▼           │    │         ▼           │      │
+│  │ │ Mgmt-DevOps     │ │    │ ┌─────────────────┐ │    │ ┌─────────────────┐ │      │
+│  │ │ 10.10.2.0/24    │ │    │ │ Dev-Apps        │ │    │ │ Prod-Apps       │ │      │
+│  │ │ VLAN 11         │ │    │ │ 10.20.2.0/24    │ │    │ │ 10.30.2.0/24    │ │      │
+│  │ │ ArgoCD, Jenkins │ │    │ │ VLAN 21         │ │    │ │ VLAN 31         │ │      │
+│  │ │ GitLab, Harbor  │ │    │ │ API, Services   │ │    │ │ API, Services   │ │      │
+│  │ └─────────────────┘ │    │ │ K8s Workers     │ │    │ │ K8s Workers     │ │      │
 │  │                     │    │ └─────────────────┘ │    │ └─────────────────┘ │      │
-│  │ ┌─────────────────┐ │    │                     │    │                     │      │
-│  │ │ Mgmt-Observ     │ │    │                     │    │                     │      │
-│  │ │ 10.10.3.0/24    │ │    │                     │    │                     │      │
-│  │ │ VLAN 12         │ │    │                     │    │                     │      │
-│  │ │ Grafana, Prom   │ │    │                     │    │                     │      │
-│  │ │ Loki, Tempo     │ │    │                     │    │                     │      │
-│  │ └─────────────────┘ │    │                     │    │                     │      │
+│  │ ┌─────────────────┐ │    │         │           │    │         │           │      │
+│  │ │ Mgmt-Observ     │ │    │         ▼           │    │         ▼           │      │
+│  │ │ 10.10.3.0/24    │ │    │ ┌─────────────────┐ │    │ ┌─────────────────┐ │      │
+│  │ │ VLAN 12         │ │    │ │ Dev-Data        │ │    │ │ Prod-Data       │ │      │
+│  │ │ Grafana, Prom   │ │    │ │ 10.20.3.0/24    │ │    │ │ 10.30.3.0/24    │ │      │
+│  │ │ Loki, Tempo     │ │    │ │ VLAN 22         │ │    │ │ VLAN 32         │ │      │
+│  │ └─────────────────┘ │    │ │ PostgreSQL      │ │    │ │ PostgreSQL      │ │      │
+│  │                     │    │ │ Redis, Kafka    │ │    │ │ Redis, Kafka    │ │      │
+│  │                     │    │ │ Elasticsearch   │ │    │ │ Elasticsearch   │ │      │
+│  │                     │    │ └─────────────────┘ │    │ └─────────────────┘ │      │
 │  └─────────────────────┘    └─────────────────────┘    └─────────────────────┘      │
 │                                                                                      │
 └──────────────────────────────────────────────────────────────────────────────────────┘
@@ -87,13 +92,15 @@ This document describes the simplified network architecture for the oVirt virtua
 │  │                  Linux Bridges                       │   │
 │  │   VLAN networks on eno1 (802.1q tagged)             │   │
 │  │                                                      │   │
-│  │  VLAN 10 ──┬── pfSense VM (8 interfaces)            │   │
+│  │  VLAN 10 ──┬── pfSense VM (10 interfaces)           │   │
 │  │  VLAN 11 ──┤                                         │   │
 │  │  VLAN 12 ──┤   All inter-VLAN traffic goes          │   │
 │  │  VLAN 20 ──┤   through pfSense for routing          │   │
 │  │  VLAN 21 ──┤                                         │   │
+│  │  VLAN 22 ──┤                                         │   │
 │  │  VLAN 30 ──┤                                         │   │
-│  │  VLAN 31 ──┘                                         │   │
+│  │  VLAN 31 ──┤                                         │   │
+│  │  VLAN 32 ──┘                                         │   │
 │  └─────────────────────────────────────────────────────┘   │
 │                          │                                  │
 │                     ovirtmgmt                               │
@@ -111,9 +118,9 @@ This document describes the simplified network architecture for the oVirt virtua
 ### 1. Inbound Internet Traffic (External → Internal)
 
 ```
-Internet ───▶ pfSense (WAN) ───▶ NAT/Firewall Rules ───┬──▶ Prod-DMZ (Public Web)
-                                                       ├──▶ Mgmt-DMZ (VPN/Admin)
-                                                       └──▶ Dev-DMZ  (Test Access)
+Internet ───▶ pfSense (WAN) ───▶ NAT/Firewall Rules ───┬──▶ Prod-Web (Public HTTPS)
+                                                       ├──▶ Mgmt-Core (VPN/Admin)
+                                                       └──▶ Dev-Web  (Test Access)
 ```
 
 ### 2. Outbound Internet Traffic (Internal → External)
@@ -127,29 +134,44 @@ Examples:
 • Mgmt-DevOps (ArgoCD) pulls from GitHub ───▶ pfSense ───▶ github.com
 ```
 
-### 3. Inter-VLAN / Inter-Cluster Traffic (Internal ↔ Internal)
+### 3. Inter-VLAN / 3-Tier Traffic (Internal ↔ Internal)
 
 All cross-subnet traffic routes through pfSense for firewall enforcement:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│  Dev-App (10.20.3.x) ───▶ pfSense ───▶ Dev-Database (10.20.4.x)        │
-│                           [ALLOW: port 5432]                            │
-└─────────────────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│  Prod-Web (10.30.2.x) ───▶ pfSense ───▶ Prod-App (10.30.3.x)           │
+│  3-TIER FLOW (Web → Apps → Data)                                        │
+│                                                                         │
+│  Prod-Web (10.30.1.x) ───▶ pfSense ───▶ Prod-Apps (10.30.2.x)          │
 │                            [ALLOW: port 8080]                           │
+│                                                                         │
+│  Prod-Apps (10.30.2.x) ───▶ pfSense ───▶ Prod-Data (10.30.3.x)         │
+│                             [ALLOW: port 5432, 6379, 9092]              │
 └─────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────┐
-│  Mgmt-Observability (10.10.2.x) ───▶ pfSense ───▶ Prod-App (10.30.3.x) │
-│                                       [ALLOW: port 9090 metrics]        │
+│  Dev-Web (10.20.1.x) ───▶ pfSense ───▶ Dev-Apps (10.20.2.x)            │
+│                           [ALLOW: port 8080]                            │
+│                                                                         │
+│  Dev-Apps (10.20.2.x) ───▶ pfSense ───▶ Dev-Data (10.20.3.x)           │
+│                            [ALLOW: port 5432, 6379, 9092]               │
 └─────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────┐
-│  Dev-App (10.20.3.x) ───▶ pfSense ───▶ Prod-Database (10.30.4.x)       │
-│                           [DENY: No dev→prod DB access]                 │
+│  MONITORING (Observability → All)                                       │
+│                                                                         │
+│  Mgmt-Observ (10.10.3.x) ───▶ pfSense ───▶ ALL tiers                   │
+│                                [ALLOW: port 9090, 9100, 3100 metrics]   │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│  BLOCKED TRAFFIC                                                        │
+│                                                                         │
+│  Dev-* (10.20.x.x) ───▶ pfSense ───▶ Prod-* (10.30.x.x)                │
+│                         [DENY: No dev→prod access]                      │
+│                                                                         │
+│  *-Web ───▶ pfSense ───▶ *-Data                                        │
+│             [DENY: Web tier cannot access Data tier directly]           │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -173,16 +195,18 @@ Prod-App-VM1 ───▶ pfSense ───▶ Prod-App-VM2
 
 ### pfSense Interface Configuration
 
-| pfSense Name | vtnet  | oVirt NIC | oVirt Network    | IP Address        | Purpose                    |
-|--------------|--------|-----------|------------------|-------------------|----------------------------|
-| WAN          | vtnet0 | nic1      | ovirtmgmt        | 192.168.0.101/24  | Internet uplink (DHCP)     |
-| MGMT_CORE    | vtnet1 | nic2      | Mgmt-Core-Net    | 10.10.1.1/24      | Core infrastructure        |
-| MGMT_DEVOPS  | vtnet2 | nic3      | Mgmt-DevOps-Net  | 10.10.2.1/24      | CI/CD, GitOps              |
-| MGMT_OBSERV  | vtnet3 | nic4      | Mgmt-Observ-Net  | 10.10.3.1/24      | Monitoring, Logging        |
-| DEV_APPS     | vtnet4 | nic5      | Dev-Apps-Net     | 10.20.1.1/24      | Dev applications           |
-| DEV_DATA     | vtnet5 | nic6      | Dev-Data-Net     | 10.20.2.1/24      | Dev databases              |
-| PROD_APPS    | vtnet6 | nic7      | Prod-Apps-Net    | 10.30.1.1/24      | Prod applications          |
-| PROD_DATA    | vtnet7 | nic8      | Prod-Data-Net    | 10.30.2.1/24      | Prod databases             |
+| pfSense Name | vtnet   | oVirt NIC | oVirt Network    | IP Address        | Purpose                    |
+|--------------|---------|-----------|------------------|-------------------|----------------------------|
+| WAN          | vtnet0  | nic1      | ovirtmgmt        | 192.168.0.101/24  | Internet uplink (DHCP)     |
+| MGMT_CORE    | vtnet1  | nic2      | Mgmt-Core-Net    | 10.10.1.1/24      | Core infrastructure        |
+| MGMT_DEVOPS  | vtnet2  | nic3      | Mgmt-DevOps-Net  | 10.10.2.1/24      | CI/CD, GitOps              |
+| MGMT_OBSERV  | vtnet3  | nic4      | Mgmt-Observ-Net  | 10.10.3.1/24      | Monitoring, Logging        |
+| DEV_WEB      | vtnet4  | nic5      | Dev-Web-Net      | 10.20.1.1/24      | Dev web/ingress tier       |
+| DEV_APPS     | vtnet5  | nic6      | Dev-Apps-Net     | 10.20.2.1/24      | Dev applications           |
+| DEV_DATA     | vtnet6  | nic7      | Dev-Data-Net     | 10.20.3.1/24      | Dev databases              |
+| PROD_WEB     | vtnet7  | nic8      | Prod-Web-Net     | 10.30.1.1/24      | Prod web/ingress tier      |
+| PROD_APPS    | vtnet8  | nic9      | Prod-Apps-Net    | 10.30.2.1/24      | Prod applications          |
+| PROD_DATA    | vtnet9  | nic10     | Prod-Data-Net    | 10.30.3.1/24      | Prod databases             |
 
 ### Network to VLAN Mapping
 
@@ -191,10 +215,12 @@ Prod-App-VM1 ───▶ pfSense ───▶ Prod-App-VM2
 | Mgmt-Core-Net    | 10   | 10.10.1.0/24   | 10.10.1.100-200      | DNS, NTP, LDAP, Bastion, VPN         |
 | Mgmt-DevOps-Net  | 11   | 10.10.2.0/24   | 10.10.2.100-200      | ArgoCD, Jenkins, GitLab, Harbor      |
 | Mgmt-Observ-Net  | 12   | 10.10.3.0/24   | 10.10.3.100-200      | Grafana, Prometheus, Loki, Tempo     |
-| Dev-Apps-Net     | 20   | 10.20.1.0/24   | 10.20.1.100-200      | Web, App, API servers, K8s workers   |
-| Dev-Data-Net     | 21   | 10.20.2.0/24   | 10.20.2.100-200      | PostgreSQL, Redis, Kafka, ES         |
-| Prod-Apps-Net    | 30   | 10.30.1.0/24   | 10.30.1.100-200      | Web, App, API servers, K8s workers   |
-| Prod-Data-Net    | 31   | 10.30.2.0/24   | 10.30.2.100-200      | PostgreSQL, Redis, Kafka, ES         |
+| Dev-Web-Net      | 20   | 10.20.1.0/24   | 10.20.1.100-200      | Ingress, nginx, HAProxy, CDN cache   |
+| Dev-Apps-Net     | 21   | 10.20.2.0/24   | 10.20.2.100-200      | API servers, microservices, K8s      |
+| Dev-Data-Net     | 22   | 10.20.3.0/24   | 10.20.3.100-200      | PostgreSQL, Redis, Kafka, ES         |
+| Prod-Web-Net     | 30   | 10.30.1.0/24   | 10.30.1.100-200      | Ingress, nginx, HAProxy, CDN cache   |
+| Prod-Apps-Net    | 31   | 10.30.2.0/24   | 10.30.2.100-200      | API servers, microservices, K8s      |
+| Prod-Data-Net    | 32   | 10.30.3.0/24   | 10.30.3.100-200      | PostgreSQL, Redis, Kafka, ES         |
 
 ### Static IP Reservations (per network)
 
@@ -211,34 +237,49 @@ Prod-App-VM1 ───▶ pfSense ───▶ Prod-App-VM2
 
 ### Interface Groups
 
-| Group      | Interfaces                           | Purpose                    |
-|------------|--------------------------------------|----------------------------|
-| MGMT_GROUP | MGMT_CORE, MGMT_DEVOPS, MGMT_OBSERV  | All Management networks    |
-| DEV_GROUP  | DEV_APPS, DEV_DATA                   | All Development networks   |
-| PROD_GROUP | PROD_APPS, PROD_DATA                 | All Production networks    |
+| Group      | Interfaces                              | Purpose                    |
+|------------|-----------------------------------------|----------------------------|
+| MGMT_GROUP | MGMT_CORE, MGMT_DEVOPS, MGMT_OBSERV     | All Management networks    |
+| DEV_GROUP  | DEV_WEB, DEV_APPS, DEV_DATA             | All Development networks   |
+| PROD_GROUP | PROD_WEB, PROD_APPS, PROD_DATA          | All Production networks    |
+| WEB_GROUP  | DEV_WEB, PROD_WEB                       | All Web tier networks      |
+| APPS_GROUP | DEV_APPS, PROD_APPS                     | All Apps tier networks     |
+| DATA_GROUP | DEV_DATA, PROD_DATA                     | All Data tier networks     |
 
 ### Firewall Rules
 
 | Rule                                     | Action | Notes                        |
 |------------------------------------------|--------|------------------------------|
-| WAN → Prod-Apps:443                       | ALLOW  | Public HTTPS traffic         |
+| **Inbound (WAN)**                        |        |                              |
+| WAN → Prod-Web:443,80                     | ALLOW  | Public HTTPS/HTTP traffic    |
 | WAN → Mgmt-Core:1194                      | ALLOW  | OpenVPN access               |
 | WAN → *:*                                 | DENY   | Block all other inbound      |
+| **3-Tier Flow (Web → Apps → Data)**      |        |                              |
+| Prod-Web → Prod-Apps:8080,8443            | ALLOW  | Web to application tier      |
 | Prod-Apps → Prod-Data:5432,6379,9092      | ALLOW  | Apps to databases/cache/msg  |
+| Dev-Web → Dev-Apps:8080,8443              | ALLOW  | Web to application tier      |
 | Dev-Apps → Dev-Data:5432,6379,9092        | ALLOW  | Apps to databases/cache/msg  |
+| **Tier Isolation**                       |        |                              |
+| WEB_GROUP → DATA_GROUP                    | DENY   | Web cannot access data direct|
+| DATA_GROUP → WEB_GROUP                    | DENY   | Data cannot access web       |
+| DATA_GROUP → APPS_GROUP                   | DENY   | Data cannot initiate to apps |
+| **Environment Isolation**                |        |                              |
 | DEV_GROUP → PROD_GROUP                    | DENY   | No dev to prod access        |
 | PROD_GROUP → DEV_GROUP                    | DENY   | No prod to dev access        |
+| **Management Access**                    |        |                              |
 | Mgmt-Observ → ALL:9090,9100,3100          | ALLOW  | Prometheus/Loki scraping     |
-| ALL → Mgmt-Core:53,389,636                | ALLOW  | DNS and LDAP                 |
+| ALL → Mgmt-Core:53,123,389,636            | ALLOW  | DNS, NTP, and LDAP           |
 | ALL → WAN (Outbound)                      | ALLOW  | Internet access (NAT)        |
 
 ## Traffic Summary
 
 | Traffic Type       | Path                                              |
 |--------------------|---------------------------------------------------|
-| Inbound Internet   | Internet → pfSense (WAN) → Prod-Apps              |
+| Inbound Internet   | Internet → pfSense (WAN) → Prod-Web → Prod-Apps   |
 | Outbound Internet  | Any VM → pfSense (Gateway) → NAT → Internet       |
+| Web to Apps        | Web-Net → pfSense → Apps-Net (same env)           |
 | Apps to Data       | Apps-Net → pfSense → Data-Net (same env)          |
+| Web to Data        | BLOCKED (must go through Apps tier)               |
 | Cross Environment  | BLOCKED (Dev ↔ Prod)                              |
 | Monitoring         | Mgmt-Observ → ALL (metrics ports only)            |
 
@@ -248,19 +289,20 @@ Prod-App-VM1 ───▶ pfSense ───▶ Prod-App-VM2
 2. **Deploy pfSense VM** - `ansible-playbook -i inventory.ini network/configure_pfsense_vm.yml`
 3. **Post-install pfSense** - `ansible-playbook -i inventory.ini network/configure_pfsense_vm.yml --tags post_install_pfsense`
 4. **Configure pfSense**:
-   - Assign interfaces (WAN, MGMT_CORE, MGMT_DEVOPS, MGMT_OBSERV, DEV_APPS, DEV_DATA, PROD_APPS, PROD_DATA)
+   - Assign interfaces (WAN, MGMT_CORE, MGMT_DEVOPS, MGMT_OBSERV, DEV_WEB, DEV_APPS, DEV_DATA, PROD_WEB, PROD_APPS, PROD_DATA)
    - Set static IPs on each interface
-   - Create interface groups (MGMT_GROUP, DEV_GROUP, PROD_GROUP)
+   - Create interface groups (MGMT_GROUP, DEV_GROUP, PROD_GROUP, WEB_GROUP, APPS_GROUP, DATA_GROUP)
    - Enable DHCP on each interface
-   - Configure firewall rules
+   - Configure 3-tier firewall rules
 5. **Deploy VMs** - `ansible-playbook -i inventory.ini compute/deploy_vms.yml`
 
 ## Changes from Previous Architecture
 
-| Before (20 networks)         | After (7 networks)           |
+| Before (7 networks)          | After (9 networks - 3-Tier)  |
 |------------------------------|------------------------------|
-| 7 Management networks        | 3 Management networks        |
-| 5 Development networks       | 2 Development networks       |
-| 8 Production networks        | 2 Production networks        |
-| 21 pfSense interfaces        | 8 pfSense interfaces         |
-| Complex firewall rules       | Simplified with groups       |
+| 3 Management networks        | 3 Management networks        |
+| 2 Development networks       | 3 Development networks (Web/Apps/Data) |
+| 2 Production networks        | 3 Production networks (Web/Apps/Data)  |
+| 8 pfSense interfaces         | 10 pfSense interfaces        |
+| Apps+Web combined            | Separate Web tier for ingress |
+| Simplified firewall rules    | 3-tier isolation rules       |

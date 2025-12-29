@@ -2,12 +2,12 @@
 # create_networks.yml - Create VLAN networks and attach to host
 # Run: ansible-playbook -i inventory.ini network/create_networks.yml
 #
-# Simplified Network Architecture (7 networks):
+# 3-Tier Network Architecture (9 networks):
 #   - Management: VLAN 10-12 (3 networks)
-#   - Development: VLAN 20-21 (2 networks)
-#   - Production:  VLAN 30-31 (2 networks)
+#   - Development: VLAN 20-22 (3 networks: Web, Apps, Data)
+#   - Production:  VLAN 30-32 (3 networks: Web, Apps, Data)
 
-- name: Create VLAN Networks (Simplified Architecture)
+- name: Create VLAN Networks (3-Tier Architecture)
   hosts: engine
   become: true
   gather_facts: true
@@ -18,52 +18,64 @@
     host_name: "node"
     nic_name: "eno1"
 
-    # Simplified VLAN networks (7 total)
+    # 3-Tier VLAN networks (9 total)
     vlan_networks:
       # Management networks (VLAN 10-12)
       - name: "Mgmt-Core-Net"
         vlan_id: 10
-        subnet: "10.10.0.0/24"
-        gateway: "10.10.0.1"
+        subnet: "10.10.1.0/24"
+        gateway: "10.10.1.1"
         description: "Core infrastructure - DNS, NTP, LDAP, Bastion, VPN"
 
       - name: "Mgmt-DevOps-Net"
         vlan_id: 11
-        subnet: "10.10.1.0/24"
-        gateway: "10.10.1.1"
+        subnet: "10.10.2.0/24"
+        gateway: "10.10.2.1"
         description: "DevOps - ArgoCD, Jenkins, GitLab, Harbor"
 
       - name: "Mgmt-Observ-Net"
         vlan_id: 12
-        subnet: "10.10.2.0/24"
-        gateway: "10.10.2.1"
+        subnet: "10.10.3.0/24"
+        gateway: "10.10.3.1"
         description: "Observability - Grafana, Prometheus, Loki, Tempo"
 
-      # Development networks (VLAN 20-21)
-      - name: "Dev-Apps-Net"
+      # Development networks (VLAN 20-22) - 3-Tier
+      - name: "Dev-Web-Net"
         vlan_id: 20
-        subnet: "10.20.0.0/24"
-        gateway: "10.20.0.1"
-        description: "Dev Applications - Web, App, API, K8s workers"
-
-      - name: "Dev-Data-Net"
-        vlan_id: 21
         subnet: "10.20.1.0/24"
         gateway: "10.20.1.1"
-        description: "Dev Data - PostgreSQL, Redis, Kafka, Elasticsearch"
+        description: "Dev Web Tier - Ingress, nginx, HAProxy, CDN cache"
 
-      # Production networks (VLAN 30-31)
-      - name: "Prod-Apps-Net"
+      - name: "Dev-Apps-Net"
+        vlan_id: 21
+        subnet: "10.20.2.0/24"
+        gateway: "10.20.2.1"
+        description: "Dev Apps Tier - API servers, microservices, K8s workers"
+
+      - name: "Dev-Data-Net"
+        vlan_id: 22
+        subnet: "10.20.3.0/24"
+        gateway: "10.20.3.1"
+        description: "Dev Data Tier - PostgreSQL, Redis, Kafka, Elasticsearch"
+
+      # Production networks (VLAN 30-32) - 3-Tier
+      - name: "Prod-Web-Net"
         vlan_id: 30
-        subnet: "10.30.0.0/24"
-        gateway: "10.30.0.1"
-        description: "Prod Applications - Web, App, API, K8s workers"
-
-      - name: "Prod-Data-Net"
-        vlan_id: 31
         subnet: "10.30.1.0/24"
         gateway: "10.30.1.1"
-        description: "Prod Data - PostgreSQL, Redis, Kafka, Elasticsearch"
+        description: "Prod Web Tier - Ingress, nginx, HAProxy, CDN cache"
+
+      - name: "Prod-Apps-Net"
+        vlan_id: 31
+        subnet: "10.30.2.0/24"
+        gateway: "10.30.2.1"
+        description: "Prod Apps Tier - API servers, microservices, K8s workers"
+
+      - name: "Prod-Data-Net"
+        vlan_id: 32
+        subnet: "10.30.3.0/24"
+        gateway: "10.30.3.1"
+        description: "Prod Data Tier - PostgreSQL, Redis, Kafka, Elasticsearch"
 
   tasks:
     - name: Obtain SSO token from oVirt Engine
@@ -129,22 +141,24 @@
       ansible.builtin.debug:
         msg:
           - "=============================================="
-          - "VLAN Networks Setup Complete (Simplified)"
+          - "VLAN Networks Setup Complete (3-Tier)"
           - "=============================================="
           - ""
           - "MANAGEMENT (VLAN 10-12):"
-          - "  {{ nic_name }}.10  Mgmt-Core-Net     10.10.0.0/24  (DNS, NTP, LDAP, Bastion)"
-          - "  {{ nic_name }}.11  Mgmt-DevOps-Net   10.10.1.0/24  (ArgoCD, Jenkins, GitLab)"
-          - "  {{ nic_name }}.12  Mgmt-Observ-Net   10.10.2.0/24  (Grafana, Prometheus)"
+          - "  {{ nic_name }}.10  Mgmt-Core-Net     10.10.1.0/24  (DNS, NTP, LDAP, Bastion)"
+          - "  {{ nic_name }}.11  Mgmt-DevOps-Net   10.10.2.0/24  (ArgoCD, Jenkins, GitLab)"
+          - "  {{ nic_name }}.12  Mgmt-Observ-Net   10.10.3.0/24  (Grafana, Prometheus)"
           - ""
-          - "DEVELOPMENT (VLAN 20-21):"
-          - "  {{ nic_name }}.20  Dev-Apps-Net      10.20.0.0/24  (Web, App, K8s)"
-          - "  {{ nic_name }}.21  Dev-Data-Net      10.20.1.0/24  (PostgreSQL, Redis)"
+          - "DEVELOPMENT (VLAN 20-22) - 3-Tier:"
+          - "  {{ nic_name }}.20  Dev-Web-Net       10.20.1.0/24  (Ingress, nginx, HAProxy)"
+          - "  {{ nic_name }}.21  Dev-Apps-Net      10.20.2.0/24  (API, microservices, K8s)"
+          - "  {{ nic_name }}.22  Dev-Data-Net      10.20.3.0/24  (PostgreSQL, Redis, Kafka)"
           - ""
-          - "PRODUCTION (VLAN 30-31):"
-          - "  {{ nic_name }}.30  Prod-Apps-Net     10.30.0.0/24  (Web, App, K8s)"
-          - "  {{ nic_name }}.31  Prod-Data-Net     10.30.1.0/24  (PostgreSQL, Redis)"
+          - "PRODUCTION (VLAN 30-32) - 3-Tier:"
+          - "  {{ nic_name }}.30  Prod-Web-Net      10.30.1.0/24  (Ingress, nginx, HAProxy)"
+          - "  {{ nic_name }}.31  Prod-Apps-Net     10.30.2.0/24  (API, microservices, K8s)"
+          - "  {{ nic_name }}.32  Prod-Data-Net     10.30.3.0/24  (PostgreSQL, Redis, Kafka)"
           - ""
           - "=============================================="
-          - "Total: 7 VLAN networks ready for VMs"
+          - "Total: 9 VLAN networks ready for VMs"
           - "=============================================="

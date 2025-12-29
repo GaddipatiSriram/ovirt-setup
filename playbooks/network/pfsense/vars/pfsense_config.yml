@@ -15,14 +15,16 @@ pfsense_dns_servers:
 # =============================================================================
 # WAN CONFIGURATION
 # =============================================================================
+# WAN uses e1000 (em0) for better pfSense compatibility with oVirt
 pfsense_wan:
-  interface: "vtnet0"
+  interface: "em0"
   descr: "WAN"
   ipv4_type: "static"
   ipv4_address: "192.168.0.101"
   ipv4_prefixlen: 24
   ipv4_gateway: "WAN_GW"
-  blockpriv: true
+  # blockpriv must be false since WAN uses private 192.168.0.0/24 network
+  blockpriv: false
   blockbogons: true
 
 pfsense_wan_gateway:
@@ -32,53 +34,66 @@ pfsense_wan_gateway:
   default: true
 
 # =============================================================================
-# LAN INTERFACES
+# LAN INTERFACES (3-Tier Architecture)
 # =============================================================================
+# LAN interfaces use virtio (vtnet0-vtnet8) since WAN uses e1000 (em0)
 pfsense_interfaces:
   - name: "mgmt_core"
-    interface: "vtnet1"
+    interface: "vtnet0"
     descr: "MGMT_CORE"
-    ipv4_address: "10.10.0.1"
-    ipv4_prefixlen: 24
-
-  - name: "mgmt_devops"
-    interface: "vtnet2"
-    descr: "MGMT_DEVOPS"
     ipv4_address: "10.10.1.1"
     ipv4_prefixlen: 24
 
-  - name: "mgmt_observ"
-    interface: "vtnet3"
-    descr: "MGMT_OBSERV"
+  - name: "mgmt_devops"
+    interface: "vtnet1"
+    descr: "MGMT_DEVOPS"
     ipv4_address: "10.10.2.1"
+    ipv4_prefixlen: 24
+
+  - name: "mgmt_observ"
+    interface: "vtnet2"
+    descr: "MGMT_OBSERV"
+    ipv4_address: "10.10.3.1"
+    ipv4_prefixlen: 24
+
+  - name: "dev_web"
+    interface: "vtnet3"
+    descr: "DEV_WEB"
+    ipv4_address: "10.20.1.1"
     ipv4_prefixlen: 24
 
   - name: "dev_apps"
     interface: "vtnet4"
     descr: "DEV_APPS"
-    ipv4_address: "10.20.0.1"
+    ipv4_address: "10.20.2.1"
     ipv4_prefixlen: 24
 
   - name: "dev_data"
     interface: "vtnet5"
     descr: "DEV_DATA"
-    ipv4_address: "10.20.1.1"
+    ipv4_address: "10.20.3.1"
     ipv4_prefixlen: 24
 
-  - name: "prod_apps"
+  - name: "prod_web"
     interface: "vtnet6"
-    descr: "PROD_APPS"
-    ipv4_address: "10.30.0.1"
-    ipv4_prefixlen: 24
-
-  - name: "prod_data"
-    interface: "vtnet7"
-    descr: "PROD_DATA"
+    descr: "PROD_WEB"
     ipv4_address: "10.30.1.1"
     ipv4_prefixlen: 24
 
+  - name: "prod_apps"
+    interface: "vtnet7"
+    descr: "PROD_APPS"
+    ipv4_address: "10.30.2.1"
+    ipv4_prefixlen: 24
+
+  - name: "prod_data"
+    interface: "vtnet8"
+    descr: "PROD_DATA"
+    ipv4_address: "10.30.3.1"
+    ipv4_prefixlen: 24
+
 # =============================================================================
-# INTERFACE GROUPS
+# INTERFACE GROUPS (3-Tier Architecture)
 # =============================================================================
 pfsense_interface_groups:
   - name: "Management"
@@ -87,57 +102,80 @@ pfsense_interface_groups:
 
   - name: "Development"
     descr: "Development Networks"
-    members: ["dev_apps", "dev_data"]
+    members: ["dev_web", "dev_apps", "dev_data"]
 
   - name: "Production"
     descr: "Production Networks"
-    members: ["prod_apps", "prod_data"]
+    members: ["prod_web", "prod_apps", "prod_data"]
+
+  - name: "WebTier"
+    descr: "Web Tier Networks"
+    members: ["dev_web", "prod_web"]
+
+  - name: "AppsTier"
+    descr: "Apps Tier Networks"
+    members: ["dev_apps", "prod_apps"]
+
+  - name: "DataTier"
+    descr: "Data Tier Networks"
+    members: ["dev_data", "prod_data"]
 
   - name: "AllLANs"
     descr: "All Internal Networks"
-    members: ["mgmt_core", "mgmt_devops", "mgmt_observ", "dev_apps", "dev_data", "prod_apps", "prod_data"]
+    members: ["mgmt_core", "mgmt_devops", "mgmt_observ", "dev_web", "dev_apps", "dev_data", "prod_web", "prod_apps", "prod_data"]
 
 # =============================================================================
-# DHCP SERVERS
+# DHCP SERVERS (3-Tier Architecture)
 # =============================================================================
+# DHCP uses interface names (descr), not device names
 pfsense_dhcp_servers:
-  - interface: "mgmt_core"
-    range_from: "10.10.0.100"
-    range_to: "10.10.0.200"
-    domain: "mgmt.engatwork.com"
-
-  - interface: "mgmt_devops"
+  - interface: "mgmt_core"       # vtnet0
     range_from: "10.10.1.100"
     range_to: "10.10.1.200"
-    domain: "devops.engatwork.com"
+    domain: "mgmt.engatwork.com"
 
-  - interface: "mgmt_observ"
+  - interface: "mgmt_devops"     # vtnet1
     range_from: "10.10.2.100"
     range_to: "10.10.2.200"
+    domain: "devops.engatwork.com"
+
+  - interface: "mgmt_observ"     # vtnet2
+    range_from: "10.10.3.100"
+    range_to: "10.10.3.200"
     domain: "observ.engatwork.com"
 
-  - interface: "dev_apps"
-    range_from: "10.20.0.100"
-    range_to: "10.20.0.200"
-    domain: "dev.engatwork.com"
-
-  - interface: "dev_data"
+  - interface: "dev_web"         # vtnet3
     range_from: "10.20.1.100"
     range_to: "10.20.1.200"
+    domain: "devweb.engatwork.com"
+
+  - interface: "dev_apps"        # vtnet4
+    range_from: "10.20.2.100"
+    range_to: "10.20.2.200"
+    domain: "devapps.engatwork.com"
+
+  - interface: "dev_data"        # vtnet5
+    range_from: "10.20.3.100"
+    range_to: "10.20.3.200"
     domain: "devdata.engatwork.com"
 
-  - interface: "prod_apps"
-    range_from: "10.30.0.100"
-    range_to: "10.30.0.200"
-    domain: "prod.engatwork.com"
-
-  - interface: "prod_data"
+  - interface: "prod_web"        # vtnet6
     range_from: "10.30.1.100"
     range_to: "10.30.1.200"
+    domain: "prodweb.engatwork.com"
+
+  - interface: "prod_apps"       # vtnet7
+    range_from: "10.30.2.100"
+    range_to: "10.30.2.200"
+    domain: "prodapps.engatwork.com"
+
+  - interface: "prod_data"       # vtnet8
+    range_from: "10.30.3.100"
+    range_to: "10.30.3.200"
     domain: "proddata.engatwork.com"
 
 # =============================================================================
-# FIREWALL ALIASES
+# FIREWALL ALIASES (3-Tier Architecture)
 # =============================================================================
 pfsense_aliases:
   - name: "RFC1918"
@@ -148,33 +186,53 @@ pfsense_aliases:
   - name: "ManagementNets"
     type: "network"
     descr: "Management Networks"
-    address: ["10.10.0.0/24", "10.10.1.0/24", "10.10.2.0/24"]
+    address: ["10.10.1.0/24", "10.10.2.0/24", "10.10.3.0/24"]
 
   - name: "DevelopmentNets"
     type: "network"
     descr: "Development Networks"
-    address: ["10.20.0.0/24", "10.20.1.0/24"]
+    address: ["10.20.1.0/24", "10.20.2.0/24", "10.20.3.0/24"]
 
   - name: "ProductionNets"
     type: "network"
     descr: "Production Networks"
-    address: ["10.30.0.0/24", "10.30.1.0/24"]
+    address: ["10.30.1.0/24", "10.30.2.0/24", "10.30.3.0/24"]
+
+  - name: "WebTierNets"
+    type: "network"
+    descr: "Web Tier Networks"
+    address: ["10.20.1.0/24", "10.30.1.0/24"]
+
+  - name: "AppsTierNets"
+    type: "network"
+    descr: "Apps Tier Networks"
+    address: ["10.20.2.0/24", "10.30.2.0/24"]
+
+  - name: "DataTierNets"
+    type: "network"
+    descr: "Data Tier Networks"
+    address: ["10.20.3.0/24", "10.30.3.0/24"]
 
   - name: "WebPorts"
     type: "port"
     descr: "HTTP/HTTPS ports"
     address: ["80", "443"]
 
+  - name: "AppPorts"
+    type: "port"
+    descr: "Application ports"
+    address: ["8080", "8443"]
+
   - name: "DatabasePorts"
     type: "port"
     descr: "Database ports"
-    address: ["5432", "3306", "27017", "6379", "9200"]
+    address: ["5432", "3306", "27017", "6379", "9200", "9092"]
 
 # =============================================================================
-# FIREWALL RULES
+# FIREWALL RULES (3-Tier Architecture)
 # =============================================================================
 pfsense_firewall_rules:
-  # Management - Allow all outbound
+  # ============= MANAGEMENT =============
   - name: "MGMT_Allow_Out"
     interface: "Management"
     action: "pass"
@@ -182,7 +240,40 @@ pfsense_firewall_rules:
     destination: "any"
     descr: "Allow all from Management"
 
-  # Dev Apps - Allow outbound
+  # ============= DEV WEB TIER =============
+  - name: "DEV_WEB_To_Apps"
+    interface: "dev_web"
+    action: "pass"
+    protocol: "tcp"
+    source: "dev_web"
+    destination: "dev_apps"
+    destination_port: "AppPorts"
+    descr: "Allow Dev Web to Dev Apps (8080,8443)"
+
+  - name: "DEV_WEB_Block_Data"
+    interface: "dev_web"
+    action: "block"
+    source: "dev_web"
+    destination: "DataTierNets"
+    descr: "Block Dev Web direct to Data tier"
+
+  - name: "DEV_WEB_Allow_Out"
+    interface: "dev_web"
+    action: "pass"
+    source: "dev_web"
+    destination: "any"
+    descr: "Allow Dev Web outbound"
+
+  # ============= DEV APPS TIER =============
+  - name: "DEV_APPS_To_Data"
+    interface: "dev_apps"
+    action: "pass"
+    protocol: "tcp"
+    source: "dev_apps"
+    destination: "dev_data"
+    destination_port: "DatabasePorts"
+    descr: "Allow Dev Apps to Dev Data (DB ports)"
+
   - name: "DEV_APPS_Allow_Out"
     interface: "dev_apps"
     action: "pass"
@@ -190,7 +281,14 @@ pfsense_firewall_rules:
     destination: "any"
     descr: "Allow Dev Apps outbound"
 
-  # Dev Data - Block internet, allow internal
+  # ============= DEV DATA TIER =============
+  - name: "DEV_DATA_Block_Web"
+    interface: "dev_data"
+    action: "block"
+    source: "dev_data"
+    destination: "WebTierNets"
+    descr: "Block Dev Data to Web tier"
+
   - name: "DEV_DATA_Allow_Internal"
     interface: "dev_data"
     action: "pass"
@@ -198,13 +296,53 @@ pfsense_firewall_rules:
     destination: "RFC1918"
     descr: "Allow Dev Data to internal only"
 
-  # Prod Apps - Allow outbound, block to Dev
+  # ============= PROD WEB TIER =============
+  - name: "PROD_WEB_Block_Dev"
+    interface: "prod_web"
+    action: "block"
+    source: "prod_web"
+    destination: "DevelopmentNets"
+    descr: "Block Prod Web to Dev"
+
+  - name: "PROD_WEB_To_Apps"
+    interface: "prod_web"
+    action: "pass"
+    protocol: "tcp"
+    source: "prod_web"
+    destination: "prod_apps"
+    destination_port: "AppPorts"
+    descr: "Allow Prod Web to Prod Apps (8080,8443)"
+
+  - name: "PROD_WEB_Block_Data"
+    interface: "prod_web"
+    action: "block"
+    source: "prod_web"
+    destination: "DataTierNets"
+    descr: "Block Prod Web direct to Data tier"
+
+  - name: "PROD_WEB_Allow_Out"
+    interface: "prod_web"
+    action: "pass"
+    source: "prod_web"
+    destination: "any"
+    descr: "Allow Prod Web outbound"
+
+  # ============= PROD APPS TIER =============
   - name: "PROD_APPS_Block_Dev"
     interface: "prod_apps"
     action: "block"
     source: "prod_apps"
     destination: "DevelopmentNets"
-    descr: "Block Prod to Dev"
+    descr: "Block Prod Apps to Dev"
+
+  - name: "PROD_APPS_To_Data"
+    interface: "prod_apps"
+    action: "pass"
+    protocol: "tcp"
+    source: "prod_apps"
+    destination: "prod_data"
+    destination_port: "DatabasePorts"
+    descr: "Allow Prod Apps to Prod Data (DB ports)"
 
   - name: "PROD_APPS_Allow_Out"
     interface: "prod_apps"
@@ -213,17 +351,24 @@ pfsense_firewall_rules:
     destination: "any"
     descr: "Allow Prod Apps outbound"
 
-  # Prod Data - Block internet and Dev
-  - name: "PROD_DATA_Allow_Internal"
-    interface: "prod_data"
-    action: "pass"
-    source: "prod_data"
-    destination: "RFC1918"
-    descr: "Allow Prod Data to internal only"
-
+  # ============= PROD DATA TIER =============
   - name: "PROD_DATA_Block_Dev"
     interface: "prod_data"
     action: "block"
     source: "prod_data"
     destination: "DevelopmentNets"
     descr: "Block Prod Data to Dev"
+
+  - name: "PROD_DATA_Block_Web"
+    interface: "prod_data"
+    action: "block"
+    source: "prod_data"
+    destination: "WebTierNets"
+    descr: "Block Prod Data to Web tier"
+
+  - name: "PROD_DATA_Allow_Internal"
+    interface: "prod_data"
+    action: "pass"
+    source: "prod_data"
+    destination: "RFC1918"
+    descr: "Allow Prod Data to internal only"

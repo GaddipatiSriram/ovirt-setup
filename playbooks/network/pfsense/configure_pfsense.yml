@@ -3,36 +3,19 @@
 # Run: ansible-playbook playbooks/network/pfsense/configure_pfsense.yml
 #
 # Prerequisites:
-#   - pfSense VM running with WebConfigurator enabled
+#   - pfSense VM running with SSH enabled
 #   - ansible-galaxy collection install pfsensible.core
 #
 # Usage:
-#   ansible-playbook playbooks/network/pfsense/configure_pfsense.yml \
-#     -e pfsense_host=192.168.0.101 \
-#     -e pfsense_user=admin \
-#     -e pfsense_password=pfsense
+#   ansible-playbook playbooks/network/pfsense/configure_pfsense.yml
 
 - name: Configure pfSense Firewall
-  hosts: localhost
+  hosts: pfsense
   gather_facts: false
-  connection: local
+  become: false  # pfSense SSH as admin runs as root
 
   vars_files:
     - vars/pfsense_config.yml
-
-  vars:
-    # pfSense connection settings (override via -e or group_vars)
-    pfsense_host: "192.168.0.101"
-    pfsense_user: "admin"
-    pfsense_password: "pfsense"
-    pfsense_configfile: "/cf/conf/config.xml"
-
-  module_defaults:
-    group/pfsensible.core.pfsense:
-      host: "{{ pfsense_host }}"
-      user: "{{ pfsense_user }}"
-      password: "{{ pfsense_password }}"
-      configfile: "{{ pfsense_configfile }}"
 
   tasks:
     # =========================================================================
@@ -51,7 +34,7 @@
 
         - name: Configure DNS Resolver
           pfsensible.core.pfsense_dns_resolver:
-            enable: true
+            state: present
             dnssec: false
             forwarding: true
             regdhcp: true
@@ -63,7 +46,30 @@
     - name: "PHASE 2: Interface Configuration"
       tags: [interfaces]
       block:
-        - name: Configure WAN interface
+        # First configure WAN interface without gateway
+        - name: Configure WAN interface (initial)
+          pfsensible.core.pfsense_interface:
+            interface: "{{ pfsense_wan.interface }}"
+            descr: "{{ pfsense_wan.descr }}"
+            ipv4_type: "{{ pfsense_wan.ipv4_type }}"
+            ipv4_address: "{{ pfsense_wan.ipv4_address }}"
+            ipv4_prefixlen: "{{ pfsense_wan.ipv4_prefixlen }}"
+            blockpriv: "{{ pfsense_wan.blockpriv }}"
+            blockbogons: "{{ pfsense_wan.blockbogons }}"
+            enable: true
+            state: present
+
+        # Then create the gateway
+        - name: Configure WAN gateway
+          pfsensible.core.pfsense_gateway:
+            name: "{{ pfsense_wan_gateway.name }}"
+            interface: "{{ pfsense_wan_gateway.interface }}"
+            gateway: "{{ pfsense_wan_gateway.gateway }}"
+            ipprotocol: inet
+            state: present
+
+        # Now update WAN interface with gateway reference
+        - name: Configure WAN interface (with gateway)
           pfsensible.core.pfsense_interface:
             interface: "{{ pfsense_wan.interface }}"
             descr: "{{ pfsense_wan.descr }}"
@@ -74,14 +80,6 @@
             blockpriv: "{{ pfsense_wan.blockpriv }}"
             blockbogons: "{{ pfsense_wan.blockbogons }}"
             enable: true
-            state: present
-
-        - name: Configure WAN gateway
-          pfsensible.core.pfsense_gateway:
-            name: "{{ pfsense_wan_gateway.name }}"
-            interface: "{{ pfsense_wan_gateway.interface }}"
-            gateway: "{{ pfsense_wan_gateway.gateway }}"
-            ipprotocol: inet
             state: present
 
         - name: Set default gateway
@@ -170,7 +168,6 @@
             source: "{{ item.source }}"
             destination: "{{ item.destination }}"
             destination_port: "{{ item.destination_port | default(omit) }}"
-            descr: "{{ item.descr }}"
             state: present
           loop: "{{ pfsense_firewall_rules }}"
           loop_control:
@@ -188,7 +185,6 @@
             interface: "wan"
             source: "ManagementNets"
             destination: "any"
-            target: ""
             state: present
 
         - name: Configure outbound NAT for Development networks
@@ -197,7 +193,6 @@
             interface: "wan"
             source: "DevelopmentNets"
             destination: "any"
-            target: ""
             state: present
 
         - name: Configure outbound NAT for Production networks
@@ -206,7 +201,6 @@
             interface: "wan"
             source: "ProductionNets"
             destination: "any"
-            target: ""
             state: present
 
     # =========================================================================
@@ -217,31 +211,34 @@
       ansible.builtin.debug:
         msg:
           - "=============================================="
-          - "pfSense Configuration Complete"
+          - "pfSense Configuration Complete (3-Tier)"
           - "=============================================="
           - ""
           - "System:"
           - "  Hostname: {{ pfsense_hostname }}.{{ pfsense_domain }}"
           - "  DNS: {{ pfsense_dns_servers | join(', ') }}"
           - ""
-          - "Interfaces:"
-          - "  WAN:         {{ pfsense_wan.ipv4_address }}/{{ pfsense_wan.ipv4_prefixlen }} (GW: {{ pfsense_wan_gateway.gateway }})"
-          - "  MGMT_CORE:   10.10.0.1/24"
-          - "  MGMT_DEVOPS: 10.10.1.1/24"
-          - "  MGMT_OBSERV: 10.10.2.1/24"
-          - "  DEV_APPS:    10.20.0.1/24"
-          - "  DEV_DATA:    10.20.1.1/24"
-          - "  PROD_APPS:   10.30.0.1/24"
-          - "  PROD_DATA:   10.30.1.1/24"
+          - "Interfaces (10 total):"
+          - "  WAN (em0):          {{ pfsense_wan.ipv4_address }}/{{ pfsense_wan.ipv4_prefixlen }} (GW: {{ pfsense_wan_gateway.gateway }})"
+          - "  MGMT_CORE (vtnet0): 10.10.1.1/24"
+          - "  MGMT_DEVOPS (vtnet1): 10.10.2.1/24"
+          - "  MGMT_OBSERV (vtnet2): 10.10.3.1/24"
+          - "  DEV_WEB (vtnet3):   10.20.1.1/24"
+          - "  DEV_APPS (vtnet4):  10.20.2.1/24"
+          - "  DEV_DATA (vtnet5):  10.20.3.1/24"
+          - "  PROD_WEB (vtnet6):  10.30.1.1/24"
+          - "  PROD_APPS (vtnet7): 10.30.2.1/24"
+          - "  PROD_DATA (vtnet8): 10.30.3.1/24"
           - ""
           - "Interface Groups:"
           - "  Management:  mgmt_core, mgmt_devops, mgmt_observ"
-          - "  Development: dev_apps, dev_data"
-          - "  Production:  prod_apps, prod_data"
+          - "  Development: dev_web, dev_apps, dev_data"
+          - "  Production:  prod_web, prod_apps, prod_data"
+          - "  WebTier:     dev_web, prod_web"
+          - "  AppsTier:    dev_apps, prod_apps"
+          - "  DataTier:    dev_data, prod_data"
           - ""
-          - "DHCP: Enabled on all LAN interfaces (.100-.200)"
+          - "DHCP: Enabled on all 9 LAN interfaces (.100-.200)"
           - "Firewall: {{ pfsense_firewall_rules | length }} rules configured"
           - "NAT: Outbound NAT for all internal networks"
-          - ""
-          - "Access WebGUI: https://{{ pfsense_host }}"
           - "=============================================="

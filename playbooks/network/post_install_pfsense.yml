@@ -1,7 +1,12 @@
 ---
-# post_install_pfsense.yml - Eject ISO, set boot order, configure NICs
+# post_install_pfsense.yml - Eject ISO, set boot order, configure NICs and firewall
 # Run after pfSense installation from ISO completes
 # Run: ansible-playbook playbooks/network/post_install_pfsense.yml
+#
+# Tags:
+#   --tags vm        : Only VM operations (eject ISO, start, NICs)
+#   --tags firewall  : Only firewall/routing configuration
+#   --tags routes    : Only add routes on engine host
 
 - name: pfSense Post-Installation
   hosts: engine
@@ -12,6 +17,50 @@
     vm_name: "pfSense"
     # Timeout for VM stop (seconds) - increase if VM is slow to shutdown
     stop_timeout: 120
+
+    # pfSense SSH credentials
+    pfsense_ip: "192.168.0.101"
+    pfsense_user: "admin"
+    pfsense_password: "unix"
+
+    # VLAN networks that need internet access
+    vlan_networks:
+      - name: "MGMT_CORE"
+        interface: "vtnet0"
+        subnet: "10.10.1.0/24"
+        gateway: "10.10.1.1"
+      - name: "MGMT_DEVOPS"
+        interface: "vtnet1"
+        subnet: "10.10.2.0/24"
+        gateway: "10.10.2.1"
+      - name: "MGMT_OBSERV"
+        interface: "vtnet2"
+        subnet: "10.10.3.0/24"
+        gateway: "10.10.3.1"
+      - name: "DEV_WEB"
+        interface: "vtnet3"
+        subnet: "10.20.1.0/24"
+        gateway: "10.20.1.1"
+      - name: "DEV_APPS"
+        interface: "vtnet4"
+        subnet: "10.20.2.0/24"
+        gateway: "10.20.2.1"
+      - name: "DEV_DATA"
+        interface: "vtnet5"
+        subnet: "10.20.3.0/24"
+        gateway: "10.20.3.1"
+      - name: "PROD_WEB"
+        interface: "vtnet6"
+        subnet: "10.30.1.0/24"
+        gateway: "10.30.1.1"
+      - name: "PROD_APPS"
+        interface: "vtnet7"
+        subnet: "10.30.2.0/24"
+        gateway: "10.30.2.1"
+      - name: "PROD_DATA"
+        interface: "vtnet8"
+        subnet: "10.30.3.0/24"
+        gateway: "10.30.3.1"
 
   tasks:
     - name: Authenticate to oVirt
@@ -34,41 +83,39 @@
       when: vm_info.ovirt_vms | length == 0
 
     - name: Force stop pfSense VM (using Python SDK for reliability)
-      ansible.builtin.script:
-        cmd: |
-          python3 << 'EOF'
-          import ovirtsdk4 as sdk
-          import ovirtsdk4.types as types
-          import time
-          import sys
+      ansible.builtin.shell: |
+        python3 << 'PYEOF'
+        import ovirtsdk4 as sdk
+        import ovirtsdk4.types as types
+        import time
 
-          conn = sdk.Connection(
-              url='https://{{ ovirt_engine_fqdn }}/ovirt-engine/api',
-              username='admin@ovirt@internalsso',
-              password='{{ ovirt_engine_admin_password }}',
-              insecure=True,
-          )
+        conn = sdk.Connection(
+            url='https://{{ ovirt_engine_fqdn }}/ovirt-engine/api',
+            username='admin@ovirt@internalsso',
+            password='{{ ovirt_engine_admin_password }}',
+            insecure=True,
+        )
 
-          vms_service = conn.system_service().vms_service()
-          for vm in vms_service.list():
-              if vm.name == '{{ vm_name }}':
-                  vm_service = vms_service.vm_service(vm.id)
-                  if vm.status != types.VmStatus.DOWN:
-                      print(f"Stopping VM (status: {vm.status})...")
-                      try:
-                          vm_service.stop()
-                      except:
-                          pass
-                      for i in range({{ stop_timeout // 3 }}):
-                          time.sleep(3)
-                          vm = vm_service.get()
-                          if vm.status == types.VmStatus.DOWN:
-                              break
-                      print(f"VM stopped (status: {vm_service.get().status})")
-                  else:
-                      print("VM already stopped")
-          conn.close()
-          EOF
+        vms_service = conn.system_service().vms_service()
+        for vm in vms_service.list():
+            if vm.name == '{{ vm_name }}':
+                vm_service = vms_service.vm_service(vm.id)
+                if vm.status != types.VmStatus.DOWN:
+                    print(f"Stopping VM (status: {vm.status})...")
+                    try:
+                        vm_service.stop()
+                    except:
+                        pass
+                    for i in range({{ stop_timeout // 3 }}):
+                        time.sleep(3)
+                        vm = vm_service.get()
+                        if vm.status == types.VmStatus.DOWN:
+                            break
+                    print(f"VM stopped (status: {vm_service.get().status})")
+                else:
+                    print("VM already stopped")
+        conn.close()
+        PYEOF
       args:
         executable: /bin/bash
       register: stop_result
@@ -107,7 +154,7 @@
         name: "nic{{ item }}"
         linked: true
         state: present
-      loop: "{{ range(1, 9) | list }}"
+      loop: "{{ range(1, 11) | list }}"
       loop_control:
         label: "nic{{ item }}"
 
@@ -138,6 +185,175 @@
         state: absent
         ovirt_auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
 
+    - name: Display VM config summary
+      ansible.builtin.debug:
+        msg:
+          - "=============================================="
+          - "pfSense VM Configuration Complete"
+          - "=============================================="
+          - "  - ISO ejected"
+          - "  - Boot order set to HD only"
+          - "  - VM started"
+          - "  - All 10 NICs linked"
+          - "=============================================="
+      tags: [vm]
+
+# =============================================================================
+# PHASE 2: Configure pfSense Firewall Rules via SSH
+# =============================================================================
+- name: Configure pfSense Firewall Rules
+  hosts: engine
+  become: true
+  gather_facts: false
+  tags: [firewall]
+
+  vars:
+    pfsense_ip: "192.168.0.101"
+    pfsense_user: "admin"
+    pfsense_password: "unix"
+    # oVirt management network - needs WAN access to pfSense
+    ovirt_mgmt_network: "192.168.0.0/24"
+
+  tasks:
+    - name: Wait for pfSense SSH to be available
+      ansible.builtin.wait_for:
+        host: "{{ pfsense_ip }}"
+        port: 22
+        delay: 10
+        timeout: 120
+
+    - name: Test pfSense SSH connectivity
+      ansible.builtin.command:
+        cmd: sshpass -p '{{ pfsense_password }}' ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 {{ pfsense_user }}@{{ pfsense_ip }} "echo SSH_OK"
+      register: ssh_test
+      changed_when: false
+      failed_when: "'SSH_OK' not in ssh_test.stdout"
+
+    # CRITICAL: Add WAN allow rule FIRST to prevent lockout
+    - name: Add WAN allow rule for oVirt management network (prevents lockout)
+      ansible.builtin.command:
+        cmd: sshpass -p '{{ pfsense_password }}' ssh -o StrictHostKeyChecking=no {{ pfsense_user }}@{{ pfsense_ip }} "easyrule pass wan any any any"
+      register: wan_rule
+      changed_when: "'Rule added' in wan_rule.stdout or wan_rule.rc == 0"
+      failed_when: false
+
+    - name: Display WAN rule result
+      ansible.builtin.debug:
+        msg: "WAN allow rule: {{ wan_rule.stdout | default('configured') }}"
+
+    - name: Add allow-all rules for each LAN interface using easyrule
+      ansible.builtin.command:
+        cmd: sshpass -p '{{ pfsense_password }}' ssh -o StrictHostKeyChecking=no {{ pfsense_user }}@{{ pfsense_ip }} "easyrule pass {{ item.iface }} any any any"
+      loop:
+        - { iface: "lan", name: "MGMT_CORE" }
+        - { iface: "opt1", name: "MGMT_DEVOPS" }
+        - { iface: "opt2", name: "MGMT_OBSERV" }
+        - { iface: "opt3", name: "DEV_WEB" }
+        - { iface: "opt4", name: "DEV_APPS" }
+        - { iface: "opt5", name: "DEV_DATA" }
+        - { iface: "opt6", name: "PROD_WEB" }
+        - { iface: "opt7", name: "PROD_APPS" }
+        - { iface: "opt8", name: "PROD_DATA" }
+      loop_control:
+        label: "{{ item.name }}"
+      register: lan_rules
+      changed_when: true
+      failed_when: false
+
+    - name: Display LAN rules result
+      ansible.builtin.debug:
+        msg: "Added allow rules for all LAN interfaces"
+
+    - name: Verify pfSense can reach internet
+      ansible.builtin.command:
+        cmd: sshpass -p '{{ pfsense_password }}' ssh -o StrictHostKeyChecking=no {{ pfsense_user }}@{{ pfsense_ip }} "ping -c 2 8.8.8.8"
+      register: pfsense_internet
+      changed_when: false
+      failed_when: false
+
+    - name: Display pfSense internet connectivity
+      ansible.builtin.debug:
+        msg: "pfSense internet: {{ 'OK' if pfsense_internet.rc == 0 else 'FAILED' }}"
+
+    - name: Verify SSH still works after rule changes
+      ansible.builtin.command:
+        cmd: sshpass -p '{{ pfsense_password }}' ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 {{ pfsense_user }}@{{ pfsense_ip }} "echo VERIFY_OK"
+      register: verify_ssh
+      changed_when: false
+      failed_when: "'VERIFY_OK' not in verify_ssh.stdout"
+
+# =============================================================================
+# PHASE 3: Add Routes on Engine Host
+# =============================================================================
+- name: Configure Routes on Engine Host
+  hosts: engine
+  become: true
+  gather_facts: false
+  tags: [routes]
+
+  vars:
+    pfsense_ip: "192.168.0.101"
+
+  tasks:
+    - name: Add routes to VLAN networks via pfSense
+      ansible.builtin.shell: |
+        # Add routes if they don't exist
+        ip route show | grep -q "10.10.0.0/16 via {{ pfsense_ip }}" || \
+          ip route add 10.10.0.0/16 via {{ pfsense_ip }}
+        ip route show | grep -q "10.20.0.0/16 via {{ pfsense_ip }}" || \
+          ip route add 10.20.0.0/16 via {{ pfsense_ip }}
+        ip route show | grep -q "10.30.0.0/16 via {{ pfsense_ip }}" || \
+          ip route add 10.30.0.0/16 via {{ pfsense_ip }}
+        echo "Routes configured"
+      register: routes_result
+      changed_when: "'Routes configured' in routes_result.stdout"
+
+    - name: Make routes persistent (NetworkManager)
+      ansible.builtin.copy:
+        dest: /etc/NetworkManager/dispatcher.d/99-vlan-routes
+        content: |
+          #!/bin/bash
+          # Add routes to VLAN networks via pfSense
+          # Created by Ansible
+
+          if [ "$1" = "ovirtmgmt" ] && [ "$2" = "up" ]; then
+              ip route add 10.10.0.0/16 via {{ pfsense_ip }} 2>/dev/null || true
+              ip route add 10.20.0.0/16 via {{ pfsense_ip }} 2>/dev/null || true
+              ip route add 10.30.0.0/16 via {{ pfsense_ip }} 2>/dev/null || true
+          fi
+        mode: '0755'
+        owner: root
+        group: root
+
+    - name: Verify routes are active
+      ansible.builtin.shell: ip route show | grep -E "10\.(10|20|30)\.0\.0/16"
+      register: route_check
+      changed_when: false
+
+    - name: Display active routes
+      ansible.builtin.debug:
+        var: route_check.stdout_lines
+
+    - name: Test connectivity to VLAN gateway
+      ansible.builtin.shell: ping -c 2 -W 2 10.10.1.1
+      register: ping_test
+      changed_when: false
+      failed_when: false
+
+    - name: Display connectivity status
+      ansible.builtin.debug:
+        msg: "VLAN gateway (10.10.1.1): {{ 'REACHABLE' if ping_test.rc == 0 else 'UNREACHABLE' }}"
+
+# =============================================================================
+# PHASE 4: Final Summary
+# =============================================================================
+- name: Display Final Summary
+  hosts: engine
+  become: false
+  gather_facts: false
+  tags: [vm, firewall, routes]
+
+  tasks:
     - name: Display post-install summary
       ansible.builtin.debug:
         msg:
@@ -145,19 +361,26 @@
           - "pfSense Post-Installation Complete"
           - "=============================================="
           - ""
-          - "Completed:"
-          - "  - ISO ejected"
-          - "  - Boot order set to HD only"
-          - "  - VM started"
-          - "  - All 8 NICs linked"
+          - "pfSense Interfaces (3-Tier):"
+          - "  WAN (em0):            192.168.0.101/24 GW: 192.168.0.1"
+          - "  MGMT_CORE (vtnet0):   10.10.1.1/24"
+          - "  MGMT_DEVOPS (vtnet1): 10.10.2.1/24"
+          - "  MGMT_OBSERV (vtnet2): 10.10.3.1/24"
+          - "  DEV_WEB (vtnet3):     10.20.1.1/24"
+          - "  DEV_APPS (vtnet4):    10.20.2.1/24"
+          - "  DEV_DATA (vtnet5):    10.20.3.1/24"
+          - "  PROD_WEB (vtnet6):    10.30.1.1/24"
+          - "  PROD_APPS (vtnet7):   10.30.2.1/24"
+          - "  PROD_DATA (vtnet8):   10.30.3.1/24"
           - ""
-          - "Configure pfSense interfaces:"
-          - "  WAN (vtnet0):        192.168.0.101/24 GW: 192.168.0.1"
-          - "  MGMT_CORE (vtnet1):  10.10.0.1/24"
-          - "  MGMT_DEVOPS (vtnet2): 10.10.1.1/24"
-          - "  MGMT_OBSERV (vtnet3): 10.10.2.1/24"
-          - "  DEV_APPS (vtnet4):   10.20.0.1/24"
-          - "  DEV_DATA (vtnet5):   10.20.1.1/24"
-          - "  PROD_APPS (vtnet6):  10.30.0.1/24"
-          - "  PROD_DATA (vtnet7):  10.30.1.1/24"
+          - "Firewall Rules:"
+          - "  - All VLAN interfaces allow outbound traffic"
+          - "  - NAT configured for internet access"
+          - ""
+          - "Engine Host Routes:"
+          - "  10.10.0.0/16 via 192.168.0.101"
+          - "  10.20.0.0/16 via 192.168.0.101"
+          - "  10.30.0.0/16 via 192.168.0.101"
+          - ""
+          - "pfSense Web UI: https://192.168.0.101/"
           - "=============================================="

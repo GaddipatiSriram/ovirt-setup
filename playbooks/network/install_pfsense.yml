@@ -27,7 +27,7 @@
     pfsense_wan_ip: "192.168.0.101"
     pfsense_wan_gateway: "192.168.0.1"
 
-    # Networks for pfSense (8 interfaces total)
+    # Networks for pfSense (10 interfaces total - 3-Tier Architecture)
     pfsense_networks:
       - name: "ovirtmgmt"
         nic_name: "nic1"
@@ -38,37 +38,47 @@
       - name: "Mgmt-Core-Net"
         nic_name: "nic2"
         pfsense_name: "MGMT_CORE"
-        ip_address: "10.10.0.1"
+        ip_address: "10.10.1.1"
 
       - name: "Mgmt-DevOps-Net"
         nic_name: "nic3"
         pfsense_name: "MGMT_DEVOPS"
-        ip_address: "10.10.1.1"
+        ip_address: "10.10.2.1"
 
       - name: "Mgmt-Observ-Net"
         nic_name: "nic4"
         pfsense_name: "MGMT_OBSERV"
-        ip_address: "10.10.2.1"
+        ip_address: "10.10.3.1"
 
-      - name: "Dev-Apps-Net"
+      - name: "Dev-Web-Net"
         nic_name: "nic5"
-        pfsense_name: "DEV_APPS"
-        ip_address: "10.20.0.1"
-
-      - name: "Dev-Data-Net"
-        nic_name: "nic6"
-        pfsense_name: "DEV_DATA"
+        pfsense_name: "DEV_WEB"
         ip_address: "10.20.1.1"
 
-      - name: "Prod-Apps-Net"
+      - name: "Dev-Apps-Net"
+        nic_name: "nic6"
+        pfsense_name: "DEV_APPS"
+        ip_address: "10.20.2.1"
+
+      - name: "Dev-Data-Net"
         nic_name: "nic7"
+        pfsense_name: "DEV_DATA"
+        ip_address: "10.20.3.1"
+
+      - name: "Prod-Web-Net"
+        nic_name: "nic8"
+        pfsense_name: "PROD_WEB"
+        ip_address: "10.30.1.1"
+
+      - name: "Prod-Apps-Net"
+        nic_name: "nic9"
         pfsense_name: "PROD_APPS"
-        ip_address: "10.30.0.1"
+        ip_address: "10.30.2.1"
 
       - name: "Prod-Data-Net"
-        nic_name: "nic8"
+        nic_name: "nic10"
         pfsense_name: "PROD_DATA"
-        ip_address: "10.30.1.1"
+        ip_address: "10.30.3.1"
 
   tasks:
     - name: Authenticate to oVirt
@@ -180,12 +190,13 @@
         name: "{{ item.nic_name }}"
         profile: "{{ item.name }}"
         network: "{{ item.name }}"
-        interface: virtio
+        # WAN (nic1) uses e1000 for better pfSense compatibility, LANs use virtio
+        interface: "{{ 'e1000' if item.nic_name == 'nic1' else 'virtio' }}"
         mac_address: "{{ item.mac_address | default(omit) }}"
         state: present
       loop: "{{ pfsense_networks }}"
       loop_control:
-        label: "{{ item.nic_name }} -> {{ item.name }} ({{ item.pfsense_name }})"
+        label: "{{ item.nic_name }} -> {{ item.name }} ({{ item.pfsense_name }}) [{{ 'e1000' if item.nic_name == 'nic1' else 'virtio' }}]"
 
     - name: Attach pfSense ISO and start VM
       ovirt.ovirt.ovirt_vm:
@@ -215,15 +226,17 @@
           - "  CPU: {{ vm_cpu_sockets }} socket x {{ vm_cpu_cores }} cores"
           - "  Disk: {{ vm_disk_size }} on {{ storage_domain }}"
           - ""
-          - "Network Interfaces (8 total):"
-          - "  nic1 (vtnet0) -> ovirtmgmt       WAN          {{ pfsense_wan_ip }}"
-          - "  nic2 (vtnet1) -> Mgmt-Core-Net   MGMT_CORE    10.10.0.1"
-          - "  nic3 (vtnet2) -> Mgmt-DevOps-Net MGMT_DEVOPS  10.10.1.1"
-          - "  nic4 (vtnet3) -> Mgmt-Observ-Net MGMT_OBSERV  10.10.2.1"
-          - "  nic5 (vtnet4) -> Dev-Apps-Net    DEV_APPS     10.20.0.1"
-          - "  nic6 (vtnet5) -> Dev-Data-Net    DEV_DATA     10.20.1.1"
-          - "  nic7 (vtnet6) -> Prod-Apps-Net   PROD_APPS    10.30.0.1"
-          - "  nic8 (vtnet7) -> Prod-Data-Net   PROD_DATA    10.30.1.1"
+          - "Network Interfaces (10 total - 3-Tier):"
+          - "  nic1  (em0)    -> ovirtmgmt        WAN          {{ pfsense_wan_ip }} [e1000]"
+          - "  nic2  (vtnet0) -> Mgmt-Core-Net    MGMT_CORE    10.10.1.1  [virtio]"
+          - "  nic3  (vtnet1) -> Mgmt-DevOps-Net  MGMT_DEVOPS  10.10.2.1  [virtio]"
+          - "  nic4  (vtnet2) -> Mgmt-Observ-Net  MGMT_OBSERV  10.10.3.1  [virtio]"
+          - "  nic5  (vtnet3) -> Dev-Web-Net      DEV_WEB      10.20.1.1  [virtio]"
+          - "  nic6  (vtnet4) -> Dev-Apps-Net     DEV_APPS     10.20.2.1  [virtio]"
+          - "  nic7  (vtnet5) -> Dev-Data-Net     DEV_DATA     10.20.3.1  [virtio]"
+          - "  nic8  (vtnet6) -> Prod-Web-Net     PROD_WEB     10.30.1.1  [virtio]"
+          - "  nic9  (vtnet7) -> Prod-Apps-Net    PROD_APPS    10.30.2.1  [virtio]"
+          - "  nic10 (vtnet8) -> Prod-Data-Net    PROD_DATA    10.30.3.1  [virtio]"
           - ""
           - "=============================================="
           - "Next Steps:"
