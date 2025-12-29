@@ -1,0 +1,24 @@
+---
+# MGMT Core VMs - 3 VMs on MGMT_CORE network (10.10.1.0/24)
+# Usage: ansible-playbook deploy_vms.yml -e @vars/mgmt-core.yml
+#
+# These VMs are used for the Kubernetes cluster (control plane + workers)
+
+# VM naming
+vm_prefix: "mgmt-core"
+vm_count: 3
+
+# VM size
+vm_size: "medium"
+
+# Network - VLAN 10
+network_name: "Mgmt-Core-Net"
+
+# Template
+template_name: "fedora-41-mgmt"
+
+# Cloud-init
+root_password: "unix"
+admin_user: "admin"
+admin_password: "unix"
+domain: "engatwork.com"

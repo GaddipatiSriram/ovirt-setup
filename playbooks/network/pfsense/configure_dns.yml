@@ -1,0 +1,89 @@
+---
+# configure_dns.yml - Configure DNS settings on pfSense
+# Run: ansible-playbook playbooks/network/pfsense/configure_dns.yml
+#
+# This playbook configures:
+#   - DNS domain overrides (forward specific domains to other DNS servers)
+#   - DHCP search domain for short name resolution
+#
+# Prerequisites:
+#   - pfSense VM running with SSH enabled
+#   - ansible-galaxy collection install pfsensible.core
+#   - CoreDNS deployed on K8s cluster (for domain override target)
+#
+# Usage:
+#   # Full DNS configuration
+#   ansible-playbook playbooks/network/pfsense/configure_dns.yml
+#
+#   # Only configure domain overrides
+#   ansible-playbook playbooks/network/pfsense/configure_dns.yml --tags domain-override
+#
+#   # Only update DHCP search domain
+#   ansible-playbook playbooks/network/pfsense/configure_dns.yml --tags dhcp
+
+- name: Configure DNS on pfSense
+  hosts: pfsense
+  gather_facts: false
+  become: false
+
+  vars_files:
+    - vars/dns_config.yml
+
+  tasks:
+    # =========================================================================
+    # PHASE 1: DNS DOMAIN OVERRIDES
+    # =========================================================================
+    - name: "PHASE 1: DNS Domain Overrides"
+      tags: [domain-override]
+      block:
+        - name: Configure DNS resolver with domain overrides
+          pfsensible.core.pfsense_dns_resolver:
+            state: present
+            dnssec: false
+            forwarding: true
+            regdhcp: true
+            regdhcpstatic: true
+            domainoverrides: "{{ dns_domain_overrides }}"
+
+    # =========================================================================
+    # PHASE 2: DHCP SEARCH DOMAIN
+    # =========================================================================
+    - name: "PHASE 2: DHCP Search Domain Configuration"
+      tags: [dhcp]
+      block:
+        - name: Update DHCP servers with search domain
+          pfsensible.core.pfsense_dhcp_server:
+            interface: "{{ item.interface }}"
+            enable: true
+            range_from: "{{ item.range_from }}"
+            range_to: "{{ item.range_to }}"
+            domain: "{{ dns_search_domain }}"
+            defaultleasetime: 86400
+            maxleasetime: 172800
+            state: present
+          loop: "{{ dhcp_interfaces }}"
+          loop_control:
+            label: "{{ item.interface }} ({{ dns_search_domain }})"
+
+    # =========================================================================
+    # SUMMARY
+    # =========================================================================
+    - name: Display DNS configuration summary
+      tags: [always]
+      ansible.builtin.debug:
+        msg:
+          - "=============================================="
+          - "pfSense DNS Configuration Complete"
+          - "=============================================="
+          - ""
+          - "DNS Domain Overrides:"
+          - "{% for override in dns_domain_overrides %}  {{ override.domain }} -> {{ override.ip }}{% if override.descr is defined %} ({{ override.descr }}){% endif %}\n{% endfor %}"
+          - ""
+          - "DHCP Search Domain: {{ dns_search_domain }}"
+          - "Configured on {{ dhcp_interfaces | length }} interfaces"
+          - ""
+          - "Next Steps:"
+          - "  - VMs need to renew DHCP lease or reboot"
+          - "  - Test: ping mgmt-core-01 (short name)"
+          - "  - Test: dig @10.10.1.200 pfsense.engatwork.com"
+          - "=============================================="

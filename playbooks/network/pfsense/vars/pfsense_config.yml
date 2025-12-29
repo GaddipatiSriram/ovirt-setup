@@ -128,51 +128,52 @@ pfsense_interface_groups:
 # DHCP SERVERS (3-Tier Architecture)
 # =============================================================================
 # DHCP uses interface names (descr), not device names
+# All interfaces use engatwork.com as the search domain for DNS short name resolution
 pfsense_dhcp_servers:
   - interface: "mgmt_core"       # vtnet0
     range_from: "10.10.1.100"
     range_to: "10.10.1.200"
-    domain: "mgmt.engatwork.com"
+    domain: "engatwork.com"
 
   - interface: "mgmt_devops"     # vtnet1
     range_from: "10.10.2.100"
     range_to: "10.10.2.200"
-    domain: "devops.engatwork.com"
+    domain: "engatwork.com"
 
   - interface: "mgmt_observ"     # vtnet2
     range_from: "10.10.3.100"
     range_to: "10.10.3.200"
-    domain: "observ.engatwork.com"
+    domain: "engatwork.com"
 
   - interface: "dev_web"         # vtnet3
     range_from: "10.20.1.100"
     range_to: "10.20.1.200"
-    domain: "devweb.engatwork.com"
+    domain: "engatwork.com"
 
   - interface: "dev_apps"        # vtnet4
     range_from: "10.20.2.100"
     range_to: "10.20.2.200"
-    domain: "devapps.engatwork.com"
+    domain: "engatwork.com"
 
   - interface: "dev_data"        # vtnet5
     range_from: "10.20.3.100"
     range_to: "10.20.3.200"
-    domain: "devdata.engatwork.com"
+    domain: "engatwork.com"
 
   - interface: "prod_web"        # vtnet6
     range_from: "10.30.1.100"
     range_to: "10.30.1.200"
-    domain: "prodweb.engatwork.com"
+    domain: "engatwork.com"
 
   - interface: "prod_apps"       # vtnet7
     range_from: "10.30.2.100"
     range_to: "10.30.2.200"
-    domain: "prodapps.engatwork.com"
+    domain: "engatwork.com"
 
   - interface: "prod_data"       # vtnet8
     range_from: "10.30.3.100"
     range_to: "10.30.3.200"
-    domain: "proddata.engatwork.com"
+    domain: "engatwork.com"
 
 # =============================================================================
 # FIREWALL ALIASES (3-Tier Architecture)

@@ -1,0 +1,22 @@
+---
+# MGMT Observability VMs - 3 VMs on MGMT_OBSERV network (10.10.3.0/24)
+# Usage: ansible-playbook deploy_vms.yml -e @vars/mgmt-observ.yml
+
+# VM naming
+vm_prefix: "mgmt-observ"
+vm_count: 3
+
+# VM size
+vm_size: "medium"
+
+# Network - VLAN 12
+network_name: "Mgmt-Observ-Net"
+
+# Template
+template_name: "fedora-41-mgmt"
+
+# Cloud-init
+root_password: "unix"
+admin_user: "admin"
+admin_password: "unix"
+domain: "engatwork.com"
