@@ -1,0 +1,24 @@
+---
+# DEV Data Tier VMs - 3 VMs on Dev-Data-Net (10.20.3.0/24)
+# Usage: ansible-playbook deploy_vms.yml -e @vars/dev-data.yml
+#
+# Purpose: PostgreSQL, Redis, Kafka, Elasticsearch
+
+# VM naming
+vm_prefix: "dev-data"
+vm_count: 3
+
+# VM size - larger for databases
+vm_size: "large"
+
+# Network - VLAN 22
+network_name: "Dev-Data-Net"
+
+# Template
+template_name: "fedora-41-mgmt"
+
+# Cloud-init
+root_password: "unix"
+admin_user: "admin"
+admin_password: "unix"
+domain: "engatwork.com"

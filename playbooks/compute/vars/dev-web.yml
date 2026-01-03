@@ -1,0 +1,24 @@
+---
+# DEV Web Tier VMs - 3 VMs on Dev-Web-Net (10.20.1.0/24)
+# Usage: ansible-playbook deploy_vms.yml -e @vars/dev-web.yml
+#
+# Purpose: Ingress controllers, nginx, HAProxy, CDN cache
+
+# VM naming
+vm_prefix: "dev-web"
+vm_count: 3
+
+# VM size
+vm_size: "medium"
+
+# Network - VLAN 20
+network_name: "Dev-Web-Net"
+
+# Template
+template_name: "fedora-41-mgmt"
+
+# Cloud-init
+root_password: "unix"
+admin_user: "admin"
+admin_password: "unix"
+domain: "engatwork.com"

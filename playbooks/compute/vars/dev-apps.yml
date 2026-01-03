@@ -1,0 +1,24 @@
+---
+# DEV Apps Tier VMs - 3 VMs on Dev-Apps-Net (10.20.2.0/24)
+# Usage: ansible-playbook deploy_vms.yml -e @vars/dev-apps.yml
+#
+# Purpose: API servers, microservices, K8s workers
+
+# VM naming
+vm_prefix: "dev-apps"
+vm_count: 3
+
+# VM size
+vm_size: "medium"
+
+# Network - VLAN 21
+network_name: "Dev-Apps-Net"
+
+# Template
+template_name: "fedora-41-mgmt"
+
+# Cloud-init
+root_password: "unix"
+admin_user: "admin"
+admin_password: "unix"
+domain: "engatwork.com"

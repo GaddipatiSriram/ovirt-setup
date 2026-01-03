@@ -229,11 +229,50 @@ pfsense_aliases:
     descr: "Database ports"
     address: ["5432", "3306", "27017", "6379", "9200", "9092"]
 
+  - name: "OvirtMgmtNet"
+    type: "network"
+    descr: "oVirt Management Network (WAN side)"
+    address: ["192.168.0.0/24"]
+
+  - name: "AllInternalNets"
+    type: "network"
+    descr: "All Internal VLAN Networks"
+    address: ["10.10.0.0/16", "10.20.0.0/16", "10.30.0.0/16"]
+
 # =============================================================================
 # FIREWALL RULES (3-Tier Architecture)
 # =============================================================================
 pfsense_firewall_rules:
+  # ============= WAN RULES =============
+  - name: "Allow_oVirt_Mgmt"
+    interface: "wan"
+    action: "pass"
+    source: "192.168.0.0/24"
+    destination: "any"
+    descr: "Allow oVirt management network"
+
+  - name: "WAN_EasyRule_Pass"
+    interface: "wan"
+    action: "pass"
+    source: "any"
+    destination: "any"
+    descr: "Passed via EasyRule"
+
+  - name: "WAN_OvirtMgmt_To_Internal"
+    interface: "wan"
+    action: "pass"
+    source: "OvirtMgmtNet"
+    destination: "AllInternalNets"
+    descr: "Allow oVirt mgmt network to all internal VLANs"
+
   # ============= MANAGEMENT =============
+  - name: "LAN_EasyRule_Pass"
+    interface: "lan"
+    action: "pass"
+    source: "any"
+    destination: "any"
+    descr: "Passed via EasyRule"
+
   - name: "MGMT_Allow_Out"
     interface: "Management"
     action: "pass"
@@ -294,8 +333,15 @@ pfsense_firewall_rules:
     interface: "dev_data"
     action: "pass"
     source: "dev_data"
-    destination: "RFC1918"
-    descr: "Allow Dev Data to internal only"
+    destination: "any"
+    descr: "Allow Dev Data internal traffic"
+
+  - name: "DEV_DATA_EasyRule_Pass"
+    interface: "dev_data"
+    action: "pass"
+    source: "any"
+    destination: "any"
+    descr: "Passed via EasyRule"
 
   # ============= PROD WEB TIER =============
   - name: "PROD_WEB_Block_Dev"
@@ -371,5 +417,5 @@ pfsense_firewall_rules:
     interface: "prod_data"
     action: "pass"
     source: "prod_data"
-    destination: "RFC1918"
-    descr: "Allow Prod Data to internal only"
+    destination: "any"
+    descr: "Allow Prod Data internal traffic"
