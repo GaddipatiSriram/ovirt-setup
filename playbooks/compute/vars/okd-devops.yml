@@ -1,0 +1,26 @@
+---
+# OKD Single Node (SNO) - 1 VM on MGMT_DEVOPS network (10.10.2.0/24)
+# Usage: ansible-playbook deploy_vms.yml -e @vars/okd-devops.yml
+#
+# Single Node OKD - control plane and worker on one node
+# Suitable for development, testing, and learning
+
+# VM naming
+vm_prefix: "okd"
+vm_count: 1
+
+# VM size - sno size (32GB RAM, 8 cores, 120GB disk)
+vm_size: "sno"
+
+# Network - VLAN 11 (Mgmt-DevOps)
+network_name: "Mgmt-DevOps-Net"
+
+# Template - requires Fedora CoreOS (FCOS) for OKD 4.x
+# Note: Download FCOS and create template before deploying
+template_name: "fcos-stable"
+
+# Cloud-init (Note: OKD uses Ignition, not cloud-init)
+root_password: "unix"
+admin_user: "core"
+admin_password: "unix"
+domain: "engatwork.com"

@@ -44,6 +44,16 @@
         memory_guaranteed: 2GiB
         cpu_cores: 4
         disk_size: 80GiB
+      okd:
+        memory: 16GiB
+        memory_guaranteed: 8GiB
+        cpu_cores: 4
+        disk_size: 120GiB
+      sno:
+        memory: 32GiB
+        memory_guaranteed: 16GiB
+        cpu_cores: 8
+        disk_size: 120GiB
 
     # Network (default from template, or override)
     # Options: Mgmt-Core-Net, Mgmt-DevOps-Net, Mgmt-Observ-Net, Dev-Apps-Net, Dev-Data-Net, Prod-Apps-Net, Prod-Data-Net

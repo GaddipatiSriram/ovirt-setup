@@ -17,7 +17,7 @@
     download_dir: "/tmp/cloud-images"
 
     # Which images to download (override with -e)
-    # Options: fedora41, fedora40, rocky9, rocky8, ubuntu2404, ubuntu2204, debian12, debian11, alma9, all
+    # Options: fedora41, fedora40, rocky9, rocky8, ubuntu2404, ubuntu2204, debian12, debian11, alma9, fcos_stable, all
     images_to_download:
       - fedora41
 
@@ -85,6 +85,14 @@
         url: "https://cloud.debian.org/images/cloud/bullseye/latest/debian-11-generic-amd64.qcow2"
         description: "Debian 11 Bullseye Cloud"
         os_type: "debian_64"
+
+      fcos_stable:
+        name: "FCOS-Stable"
+        filename: "fedora-coreos-stable-openstack.x86_64.qcow2"
+        url: "https://builds.coreos.fedoraproject.org/prod/streams/stable/builds/41.20241122.3.0/x86_64/fedora-coreos-41.20241122.3.0-openstack.x86_64.qcow2.xz"
+        description: "Fedora CoreOS Stable (for OKD/OpenShift)"
+        os_type: "fedora_64"
+        compressed: true
 
   tasks:
     # ==================== SETUP ====================

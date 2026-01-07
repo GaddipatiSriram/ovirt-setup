@@ -101,6 +101,14 @@
         os_type: "debian_64"
         bios_type: "q35_sea_bios"
 
+      fcos_stable:
+        name: "FCOS-Stable"
+        filename: "fedora-coreos-stable-openstack.x86_64.qcow2"
+        url: "https://builds.coreos.fedoraproject.org/prod/streams/stable/builds/41.20241122.3.0/x86_64/fedora-coreos-41.20241122.3.0-openstack.x86_64.qcow2.xz"
+        os_type: "fedora_coreos_64"
+        bios_type: "q35_ovmf"
+        compressed: true
+
   tasks:
     # ==================== SETUP ====================
     - name: Set image facts
