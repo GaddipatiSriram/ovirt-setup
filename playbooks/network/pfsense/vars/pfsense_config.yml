@@ -13,6 +13,15 @@ pfsense_dns_servers:
   - "8.8.4.4"
 
 # =============================================================================
+# DNS DOMAIN OVERRIDES
+# =============================================================================
+# Forward internal domains to CoreDNS (running on mgmt-core k8s cluster)
+pfsense_dns_domain_overrides:
+  - domain: "engatwork.com"
+    ip: "10.10.1.200"
+    descr: "Forward engatwork.com to CoreDNS"
+
+# =============================================================================
 # WAN CONFIGURATION
 # =============================================================================
 # WAN uses e1000 (em0) for better pfSense compatibility with oVirt

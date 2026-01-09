@@ -39,6 +39,47 @@
             forwarding: true
             regdhcp: true
             regdhcpstatic: true
+            domainoverrides: "{{ pfsense_dns_domain_overrides | default([]) }}"
+          register: dns_resolver_result
+
+        - name: Allow DNS queries from WAN network (oVirt management)
+          ansible.builtin.raw: |
+            /usr/local/bin/php -r '
+            require_once("config.inc");
+            require_once("unbound.inc");
+            global $config;
+            $found = false;
+            if (!isset($config["unbound"]["acls"])) {
+              $config["unbound"]["acls"] = array();
+            }
+            foreach ($config["unbound"]["acls"] as $acl) {
+              if ($acl["aclname"] == "OvirtMgmt") {
+                $found = true;
+                break;
+              }
+            }
+            if (!$found) {
+              $config["unbound"]["acls"][] = array(
+                "aclname" => "OvirtMgmt",
+                "aclaction" => "allow",
+                "description" => "Allow DNS from oVirt management network",
+                "row" => array(
+                  array("acl_network" => "192.168.0.0", "mask" => "24")
+                )
+              );
+              write_config("Added OvirtMgmt DNS access list");
+              echo "Added OvirtMgmt access list\n";
+            } else {
+              echo "OvirtMgmt access list already exists\n";
+            }
+            '
+          register: dns_acl_result
+          changed_when: "'Added' in dns_acl_result.stdout"
+
+        - name: Restart DNS Resolver to apply changes
+          ansible.builtin.raw: /usr/local/sbin/pfSsh.php playback svc restart unbound
+          when: dns_resolver_result.changed or dns_acl_result.changed or (pfsense_dns_domain_overrides | default([]) | length > 0)
+          changed_when: true
 
     # =========================================================================
     # PHASE 2: INTERFACE CONFIGURATION
