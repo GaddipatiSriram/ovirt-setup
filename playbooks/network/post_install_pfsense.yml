@@ -6,6 +6,7 @@
 # Tags:
 #   --tags vm        : Only VM operations (eject ISO, start, NICs)
 #   --tags firewall  : Only firewall/routing configuration
+#   --tags haproxy   : Only install HAProxy package
 #   --tags routes    : Only add routes on engine host
 
 - name: pfSense Post-Installation
@@ -283,7 +284,40 @@
       failed_when: "'VERIFY_OK' not in verify_ssh.stdout"
 
 # =============================================================================
-# PHASE 3: Add Routes on Engine Host
+# PHASE 3: Install HAProxy Package
+# =============================================================================
+- name: Install HAProxy on pfSense
+  hosts: engine
+  become: true
+  gather_facts: false
+  tags: [packages, haproxy]
+
+  vars:
+    pfsense_ip: "192.168.0.101"
+    pfsense_user: "admin"
+    pfsense_password: "unix"
+
+  tasks:
+    - name: Check if HAProxy is already installed
+      ansible.builtin.command:
+        cmd: sshpass -p '{{ pfsense_password }}' ssh -o StrictHostKeyChecking=no {{ pfsense_user }}@{{ pfsense_ip }} "pkg info haproxy-devel"
+      register: haproxy_check
+      changed_when: false
+      failed_when: false
+
+    - name: Install HAProxy package
+      ansible.builtin.command:
+        cmd: sshpass -p '{{ pfsense_password }}' ssh -o StrictHostKeyChecking=no {{ pfsense_user }}@{{ pfsense_ip }} "pkg install -y haproxy-devel"
+      register: haproxy_install
+      when: haproxy_check.rc != 0
+      changed_when: "'Installed' in haproxy_install.stdout or haproxy_install.rc == 0"
+
+    - name: Display HAProxy installation status
+      ansible.builtin.debug:
+        msg: "HAProxy: {{ 'already installed' if haproxy_check.rc == 0 else 'installed' }}"
+
+# =============================================================================
+# PHASE 4: Add Routes on Engine Host
 # =============================================================================
 - name: Configure Routes on Engine Host
   hosts: engine
@@ -345,13 +379,13 @@
         msg: "VLAN gateway (10.10.1.1): {{ 'REACHABLE' if ping_test.rc == 0 else 'UNREACHABLE' }}"
 
 # =============================================================================
-# PHASE 4: Final Summary
+# PHASE 5: Final Summary
 # =============================================================================
 - name: Display Final Summary
   hosts: engine
   become: false
   gather_facts: false
-  tags: [vm, firewall, routes]
+  tags: [vm, firewall, haproxy, routes]
 
   tasks:
     - name: Display post-install summary
@@ -376,6 +410,9 @@
           - "Firewall Rules:"
           - "  - All VLAN interfaces allow outbound traffic"
           - "  - NAT configured for internet access"
+          - ""
+          - "Packages:"
+          - "  - HAProxy (haproxy-devel) installed"
           - ""
           - "Engine Host Routes:"
           - "  10.10.0.0/16 via 192.168.0.101"
