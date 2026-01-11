@@ -194,9 +194,64 @@
             label: "{{ item.name }} ({{ item.type }})"
 
     # =========================================================================
-    # PHASE 6: FIREWALL RULES
+    # PHASE 6: FLOATING FIREWALL RULES
     # =========================================================================
-    - name: "PHASE 6: Firewall Rules"
+    - name: "PHASE 6: Floating Firewall Rules"
+      tags: [floating-rules]
+      block:
+        - name: Create floating firewall rules
+          pfsensible.core.pfsense_phpshell:
+            cmd: |
+              require_once("config.inc");
+              require_once("filter.inc");
+
+              global $config;
+
+              if (!isset($config["filter"]["rule"])) {
+                  $config["filter"]["rule"] = array();
+              }
+
+              $floating_rules = array(
+              {% for rule in pfsense_floating_rules %}
+                  array(
+                      "type" => "{{ rule.action }}",
+                      "floating" => "yes",
+                      "direction" => "{{ rule.direction }}",
+                      "quick" => "{{ 'yes' if rule.quick else 'no' }}",
+                      "interface" => "{{ rule.interfaces | join(',') }}",
+                      "ipprotocol" => "inet",
+                      "source" => array("any" => ""),
+                      "destination" => array("any" => ""),
+                      "descr" => "{{ rule.descr }}"
+                  ),
+              {% endfor %}
+              );
+
+              foreach ($floating_rules as $new_rule) {
+                  $exists = false;
+                  foreach ($config["filter"]["rule"] as $existing) {
+                      if (isset($existing["descr"]) && $existing["descr"] == $new_rule["descr"]) {
+                          $exists = true;
+                          break;
+                      }
+                  }
+                  if (!$exists) {
+                      array_unshift($config["filter"]["rule"], $new_rule);
+                      echo "Added floating rule: " . $new_rule["descr"] . "\n";
+                  } else {
+                      echo "Floating rule exists: " . $new_rule["descr"] . "\n";
+                  }
+              }
+
+              write_config("Floating firewall rules configured via Ansible");
+              filter_configure();
+          register: floating_result
+          changed_when: "'Added floating' in (floating_result.stdout | default(''))"
+
+    # =========================================================================
+    # PHASE 7: FIREWALL RULES
+    # =========================================================================
+    - name: "PHASE 7: Firewall Rules"
       tags: [rules]
       block:
         - name: Create firewall rules
@@ -215,9 +270,9 @@
             label: "{{ item.name }}"
 
     # =========================================================================
-    # PHASE 7: NAT CONFIGURATION
+    # PHASE 8: NAT CONFIGURATION
     # =========================================================================
-    - name: "PHASE 7: NAT Configuration"
+    - name: "PHASE 8: NAT Configuration"
       tags: [nat]
       block:
         - name: Configure outbound NAT for Management networks

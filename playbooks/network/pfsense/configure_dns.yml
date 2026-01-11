@@ -31,9 +31,37 @@
 
   tasks:
     # =========================================================================
-    # PHASE 1: DNS DOMAIN OVERRIDES
+    # PHASE 1: DNS REBIND PROTECTION EXCEPTIONS
     # =========================================================================
-    - name: "PHASE 1: DNS Domain Overrides"
+    - name: "PHASE 1: DNS Rebind Protection Exceptions"
+      tags: [rebind]
+      block:
+        - name: Configure DNS rebind exceptions for internal domains
+          pfsensible.core.pfsense_phpshell:
+            cmd: |
+              require_once("config.inc");
+              require_once("services.inc");
+
+              global $config;
+
+              $domains = "{{ dns_rebind_exceptions | join(' ') }}";
+              $current = isset($config["unbound"]["private_domain"]) ? $config["unbound"]["private_domain"] : "";
+
+              if ($current != $domains) {
+                  $config["unbound"]["private_domain"] = $domains;
+                  write_config("Set DNS rebind exceptions via Ansible");
+                  services_unbound_configure();
+                  echo "Configured rebind exceptions: $domains\n";
+              } else {
+                  echo "Rebind exceptions already configured\n";
+              }
+          register: rebind_result
+          changed_when: "'Configured rebind' in (rebind_result.stdout | default(''))"
+
+    # =========================================================================
+    # PHASE 2: DNS DOMAIN OVERRIDES
+    # =========================================================================
+    - name: "PHASE 2: DNS Domain Overrides"
       tags: [domain-override]
       block:
         - name: Configure DNS resolver with domain overrides
@@ -46,9 +74,9 @@
             domainoverrides: "{{ dns_domain_overrides }}"
 
     # =========================================================================
-    # PHASE 2: DHCP SEARCH DOMAIN
+    # PHASE 3: DHCP SEARCH DOMAIN
     # =========================================================================
-    - name: "PHASE 2: DHCP Search Domain Configuration"
+    - name: "PHASE 3: DHCP Search Domain Configuration"
       tags: [dhcp]
       block:
         - name: Update DHCP servers with search domain

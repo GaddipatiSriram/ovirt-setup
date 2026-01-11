@@ -249,9 +249,47 @@ pfsense_aliases:
     address: ["10.10.0.0/16", "10.20.0.0/16", "10.30.0.0/16"]
 
 # =============================================================================
+# FLOATING FIREWALL RULES (apply to multiple interfaces)
+# =============================================================================
+pfsense_floating_rules:
+  - name: "Allow_All_Outbound_Internal"
+    direction: "out"
+    quick: true
+    interfaces:
+      - "lan"
+      - "opt1"
+      - "opt2"
+      - "opt3"
+      - "opt4"
+      - "opt5"
+      - "opt6"
+      - "opt7"
+      - "opt8"
+    action: "pass"
+    source: "any"
+    destination: "any"
+    descr: "Allow all outbound on internal interfaces"
+
+# =============================================================================
 # FIREWALL RULES (3-Tier Architecture)
 # =============================================================================
 pfsense_firewall_rules:
+  # ============= ALLOW ALL ON MANAGEMENT INTERFACES =============
+  # These rules ensure management interfaces have full access
+  - name: "LAN_Allow_All"
+    interface: "lan"
+    action: "pass"
+    source: "any"
+    destination: "any"
+    descr: "Allow all on LAN (MGMT_CORE)"
+
+  - name: "OPT1_Allow_All"
+    interface: "opt1"
+    action: "pass"
+    source: "any"
+    destination: "any"
+    descr: "Allow all on MGMT_DEVOPS"
+
   # ============= WAN RULES =============
   - name: "Allow_oVirt_Mgmt"
     interface: "wan"

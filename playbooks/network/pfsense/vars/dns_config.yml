@@ -10,6 +10,14 @@
 dns_search_domain: "engatwork.com"
 
 # =============================================================================
+# DNS REBIND PROTECTION EXCEPTIONS
+# =============================================================================
+# Domains that are allowed to return private IP addresses
+# Required for internal domains that resolve to RFC1918 addresses
+dns_rebind_exceptions:
+  - "engatwork.com"
+
+# =============================================================================
 # DNS DOMAIN OVERRIDES
 # =============================================================================
 # Forward DNS queries for specific domains to designated servers
