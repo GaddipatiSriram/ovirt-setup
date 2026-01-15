@@ -45,8 +45,10 @@ pfsense_wan_gateway:
 # =============================================================================
 # LAN INTERFACES (3-Tier Architecture)
 # =============================================================================
-# LAN interfaces use virtio (vtnet0-vtnet8) since WAN uses e1000 (em0)
+# LAN interfaces use virtio (vtnet0-vtnet10) since WAN uses e1000 (em0)
+# Total: 12 interfaces (1 WAN + 11 LAN)
 pfsense_interfaces:
+  # Management Networks (VLAN 10-14)
   - name: "mgmt_core"
     interface: "vtnet0"
     descr: "MGMT_CORE"
@@ -65,38 +67,52 @@ pfsense_interfaces:
     ipv4_address: "10.10.3.1"
     ipv4_prefixlen: 24
 
-  - name: "dev_web"
+  - name: "mgmt_storage"
     interface: "vtnet3"
+    descr: "MGMT_STORAGE"
+    ipv4_address: "10.10.4.1"
+    ipv4_prefixlen: 24
+
+  - name: "mgmt_forge"
+    interface: "vtnet4"
+    descr: "MGMT_FORGE"
+    ipv4_address: "10.10.5.1"
+    ipv4_prefixlen: 24
+
+  # Development Networks (VLAN 20-22)
+  - name: "dev_web"
+    interface: "vtnet5"
     descr: "DEV_WEB"
     ipv4_address: "10.20.1.1"
     ipv4_prefixlen: 24
 
   - name: "dev_apps"
-    interface: "vtnet4"
+    interface: "vtnet6"
     descr: "DEV_APPS"
     ipv4_address: "10.20.2.1"
     ipv4_prefixlen: 24
 
   - name: "dev_data"
-    interface: "vtnet5"
+    interface: "vtnet7"
     descr: "DEV_DATA"
     ipv4_address: "10.20.3.1"
     ipv4_prefixlen: 24
 
+  # Production Networks (VLAN 30-32)
   - name: "prod_web"
-    interface: "vtnet6"
+    interface: "vtnet8"
     descr: "PROD_WEB"
     ipv4_address: "10.30.1.1"
     ipv4_prefixlen: 24
 
   - name: "prod_apps"
-    interface: "vtnet7"
+    interface: "vtnet9"
     descr: "PROD_APPS"
     ipv4_address: "10.30.2.1"
     ipv4_prefixlen: 24
 
   - name: "prod_data"
-    interface: "vtnet8"
+    interface: "vtnet10"
     descr: "PROD_DATA"
     ipv4_address: "10.30.3.1"
     ipv4_prefixlen: 24
@@ -107,7 +123,7 @@ pfsense_interfaces:
 pfsense_interface_groups:
   - name: "Management"
     descr: "Management Networks"
-    members: ["mgmt_core", "mgmt_devops", "mgmt_observ"]
+    members: ["mgmt_core", "mgmt_devops", "mgmt_observ", "mgmt_storage", "mgmt_forge"]
 
   - name: "Development"
     descr: "Development Networks"
@@ -131,7 +147,7 @@ pfsense_interface_groups:
 
   - name: "AllLANs"
     descr: "All Internal Networks"
-    members: ["mgmt_core", "mgmt_devops", "mgmt_observ", "dev_web", "dev_apps", "dev_data", "prod_web", "prod_apps", "prod_data"]
+    members: ["mgmt_core", "mgmt_devops", "mgmt_observ", "mgmt_storage", "mgmt_forge", "dev_web", "dev_apps", "dev_data", "prod_web", "prod_apps", "prod_data"]
 
 # =============================================================================
 # DHCP SERVERS (3-Tier Architecture)
@@ -139,6 +155,7 @@ pfsense_interface_groups:
 # DHCP uses interface names (descr), not device names
 # All interfaces use engatwork.com as the search domain for DNS short name resolution
 pfsense_dhcp_servers:
+  # Management Networks
   - interface: "mgmt_core"       # vtnet0
     range_from: "10.10.1.100"
     range_to: "10.10.1.200"
@@ -154,32 +171,44 @@ pfsense_dhcp_servers:
     range_to: "10.10.3.200"
     domain: "engatwork.com"
 
-  - interface: "dev_web"         # vtnet3
+  - interface: "mgmt_storage"    # vtnet3
+    range_from: "10.10.4.100"
+    range_to: "10.10.4.200"
+    domain: "engatwork.com"
+
+  - interface: "mgmt_forge"      # vtnet4
+    range_from: "10.10.5.100"
+    range_to: "10.10.5.200"
+    domain: "engatwork.com"
+
+  # Development Networks
+  - interface: "dev_web"         # vtnet5
     range_from: "10.20.1.100"
     range_to: "10.20.1.200"
     domain: "engatwork.com"
 
-  - interface: "dev_apps"        # vtnet4
+  - interface: "dev_apps"        # vtnet6
     range_from: "10.20.2.100"
     range_to: "10.20.2.200"
     domain: "engatwork.com"
 
-  - interface: "dev_data"        # vtnet5
+  - interface: "dev_data"        # vtnet7
     range_from: "10.20.3.100"
     range_to: "10.20.3.200"
     domain: "engatwork.com"
 
-  - interface: "prod_web"        # vtnet6
+  # Production Networks
+  - interface: "prod_web"        # vtnet8
     range_from: "10.30.1.100"
     range_to: "10.30.1.200"
     domain: "engatwork.com"
 
-  - interface: "prod_apps"       # vtnet7
+  - interface: "prod_apps"       # vtnet9
     range_from: "10.30.2.100"
     range_to: "10.30.2.200"
     domain: "engatwork.com"
 
-  - interface: "prod_data"       # vtnet8
+  - interface: "prod_data"       # vtnet10
     range_from: "10.30.3.100"
     range_to: "10.30.3.200"
     domain: "engatwork.com"
@@ -196,7 +225,7 @@ pfsense_aliases:
   - name: "ManagementNets"
     type: "network"
     descr: "Management Networks"
-    address: ["10.10.1.0/24", "10.10.2.0/24", "10.10.3.0/24"]
+    address: ["10.10.1.0/24", "10.10.2.0/24", "10.10.3.0/24", "10.10.4.0/24", "10.10.5.0/24"]
 
   - name: "DevelopmentNets"
     type: "network"

@@ -2,15 +2,15 @@
 # create_networks.yml - Create VLAN networks and attach to host
 # Run: ansible-playbook -i inventory.ini network/create_networks.yml
 #
-# 3-Tier Network Architecture (9 networks):
-#   - Management: VLAN 10-12 (3 networks)
+# 3-Tier Network Architecture (11 networks):
+#   - Management: VLAN 10-14 (5 networks: Core, DevOps, Observability, Storage, Forge)
 #   - Development: VLAN 20-22 (3 networks: Web, Apps, Data)
 #   - Production:  VLAN 30-32 (3 networks: Web, Apps, Data)
 
 - name: Create VLAN Networks (3-Tier Architecture)
   hosts: engine
-  become: true
-  gather_facts: true
+  become: false
+  gather_facts: false
 
   vars:
     datacenter_name: "Default"
@@ -18,26 +18,38 @@
     host_name: "node"
     nic_name: "eno1"
 
-    # 3-Tier VLAN networks (9 total)
+    # 3-Tier VLAN networks (11 total)
     vlan_networks:
-      # Management networks (VLAN 10-12)
+      # Management networks (VLAN 10-14)
       - name: "Mgmt-Core-Net"
         vlan_id: 10
         subnet: "10.10.1.0/24"
         gateway: "10.10.1.1"
-        description: "Core infrastructure - DNS, NTP, LDAP, Bastion, VPN"
+        description: "Core infrastructure - CoreDNS, Keycloak, Vault"
 
       - name: "Mgmt-DevOps-Net"
         vlan_id: 11
         subnet: "10.10.2.0/24"
         gateway: "10.10.2.1"
-        description: "DevOps - ArgoCD, Jenkins, GitLab, Harbor"
+        description: "DevOps - OKD, ArgoCD, OCM, Backstage"
 
       - name: "Mgmt-Observ-Net"
         vlan_id: 12
         subnet: "10.10.3.0/24"
         gateway: "10.10.3.1"
-        description: "Observability - Grafana, Prometheus, Loki, Tempo"
+        description: "Observability - Prometheus, Grafana, Loki, Tempo"
+
+      - name: "Mgmt-Storage-Net"
+        vlan_id: 13
+        subnet: "10.10.4.0/24"
+        gateway: "10.10.4.1"
+        description: "Storage - Rook-Ceph, NFS, S3, RBD"
+
+      - name: "Mgmt-Forge-Net"
+        vlan_id: 14
+        subnet: "10.10.5.0/24"
+        gateway: "10.10.5.1"
+        description: "Software Forge - GitLab, Harbor, SonarQube"
 
       # Development networks (VLAN 20-22) - 3-Tier
       - name: "Dev-Web-Net"
@@ -144,10 +156,12 @@
           - "VLAN Networks Setup Complete (3-Tier)"
           - "=============================================="
           - ""
-          - "MANAGEMENT (VLAN 10-12):"
-          - "  {{ nic_name }}.10  Mgmt-Core-Net     10.10.1.0/24  (DNS, NTP, LDAP, Bastion)"
-          - "  {{ nic_name }}.11  Mgmt-DevOps-Net   10.10.2.0/24  (ArgoCD, Jenkins, GitLab)"
-          - "  {{ nic_name }}.12  Mgmt-Observ-Net   10.10.3.0/24  (Grafana, Prometheus)"
+          - "MANAGEMENT (VLAN 10-14):"
+          - "  {{ nic_name }}.10  Mgmt-Core-Net     10.10.1.0/24  (CoreDNS, Keycloak, Vault)"
+          - "  {{ nic_name }}.11  Mgmt-DevOps-Net   10.10.2.0/24  (OKD, ArgoCD, OCM)"
+          - "  {{ nic_name }}.12  Mgmt-Observ-Net   10.10.3.0/24  (Prometheus, Grafana)"
+          - "  {{ nic_name }}.13  Mgmt-Storage-Net  10.10.4.0/24  (Rook-Ceph, NFS, S3)"
+          - "  {{ nic_name }}.14  Mgmt-Forge-Net    10.10.5.0/24  (GitLab, Harbor, SonarQube)"
           - ""
           - "DEVELOPMENT (VLAN 20-22) - 3-Tier:"
           - "  {{ nic_name }}.20  Dev-Web-Net       10.20.1.0/24  (Ingress, nginx, HAProxy)"
@@ -160,5 +174,5 @@
           - "  {{ nic_name }}.32  Prod-Data-Net     10.30.3.0/24  (PostgreSQL, Redis, Kafka)"
           - ""
           - "=============================================="
-          - "Total: 9 VLAN networks ready for VMs"
+          - "Total: 11 VLAN networks ready for VMs"
           - "=============================================="

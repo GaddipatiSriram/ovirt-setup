@@ -20,6 +20,49 @@ dns_domain_overrides:
     descr: "Forward to CoreDNS on K8s cluster"
 
 # =============================================================================
+# OKD DNS CONFIGURATION
+# =============================================================================
+# OKD Single Node OpenShift requires specific DNS entries
+# These are configured as pfSense host overrides
+# OKD node IP (static assignment, not DHCP)
+okd_api_vip: "10.10.2.50"
+okd_ingress_vip: "10.10.2.51"
+okd_cluster_name: "okd"
+
+# DNS host overrides for OKD
+# API entries use api_vip, apps entries use ingress_vip
+okd_dns_entries:
+  - host: "api"
+    domain: "okd.engatwork.com"
+    ip: "10.10.2.50"
+    descr: "OKD API endpoint"
+
+  - host: "api-int"
+    domain: "okd.engatwork.com"
+    ip: "10.10.2.50"
+    descr: "OKD internal API endpoint"
+
+  # Apps entries use ingress VIP (10.10.2.51)
+  - host: "oauth-openshift.apps"
+    domain: "okd.engatwork.com"
+    ip: "10.10.2.51"
+    descr: "OKD OAuth"
+
+  - host: "console-openshift-console.apps"
+    domain: "okd.engatwork.com"
+    ip: "10.10.2.51"
+    descr: "OKD Console"
+
+  - host: "downloads-openshift-console.apps"
+    domain: "okd.engatwork.com"
+    ip: "10.10.2.51"
+    descr: "OKD Downloads"
+
+# NOTE: Wildcard DNS for *.apps.okd.engatwork.com is handled by CoreDNS
+# on mgmt-core cluster (10.10.1.200), not by pfSense domain overrides.
+# Do NOT add domain overrides pointing to HAProxy VIPs - they are not DNS servers.
+
+# =============================================================================
 # DHCP INTERFACES TO UPDATE
 # =============================================================================
 # List of interfaces where DHCP search domain should be configured
@@ -36,6 +79,14 @@ dhcp_interfaces:
   - interface: "mgmt_observ"
     range_from: "10.10.3.100"
     range_to: "10.10.3.200"
+
+  - interface: "mgmt_storage"
+    range_from: "10.10.4.100"
+    range_to: "10.10.4.200"
+
+  - interface: "mgmt_forge"
+    range_from: "10.10.5.100"
+    range_to: "10.10.5.200"
 
   - interface: "dev_web"
     range_from: "10.20.1.100"

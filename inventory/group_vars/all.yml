@@ -1,6 +1,6 @@
 ---
 # oVirt Engine Configuration
-ovirt_engine_fqdn: "ovirt.engatwork.com"
+ovirt_engine_fqdn: "192.168.0.105"
 ovirt_node_fqdn: "{{ ovirt_engine_fqdn }}"
 ovirt_engine_organization: "engatwork.com"
 ovirt_engine_admin_password: "unix"

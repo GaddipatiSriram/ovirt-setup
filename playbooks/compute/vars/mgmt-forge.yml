@@ -1,0 +1,31 @@
+---
+# MGMT Forge VMs - 3 VMs on MGMT_FORGE network (10.10.5.0/24)
+# Usage: ansible-playbook deploy_vms.yml -e @vars/mgmt-forge.yml
+#
+# These VMs run the software forge/development tools:
+#   - GitLab (source control, CI/CD)
+#   - Artifactory/Harbor (artifact/container registry)
+#   - SonarQube (code quality)
+#   - Vault (secrets management)
+#
+# Network: MGMT_FORGE (VLAN 14, 10.10.5.0/24)
+# Gateway: 10.10.5.1 (pfSense)
+
+# VM naming
+vm_prefix: "mgmt-forge"
+vm_count: 3
+
+# VM size - forge apps need decent resources
+vm_size: "large"
+
+# Network - VLAN 14
+network_name: "Mgmt-Forge-Net"
+
+# Template
+template_name: "fedora-41-mgmt"
+
+# Cloud-init
+root_password: "unix"
+admin_user: "admin"
+admin_password: "unix"
+domain: "engatwork.com"

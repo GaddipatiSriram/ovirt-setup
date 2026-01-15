@@ -4,7 +4,7 @@
 
 - name: Install pfSense VM
   hosts: engine
-  become: true
+  become: false
   gather_facts: false
 
   vars:
@@ -27,7 +27,7 @@
     pfsense_wan_ip: "192.168.0.101"
     pfsense_wan_gateway: "192.168.0.1"
 
-    # Networks for pfSense (10 interfaces total - 3-Tier Architecture)
+    # Networks for pfSense (12 interfaces total - 3-Tier Architecture)
     pfsense_networks:
       - name: "ovirtmgmt"
         nic_name: "nic1"
@@ -50,33 +50,43 @@
         pfsense_name: "MGMT_OBSERV"
         ip_address: "10.10.3.1"
 
-      - name: "Dev-Web-Net"
+      - name: "Mgmt-Storage-Net"
         nic_name: "nic5"
+        pfsense_name: "MGMT_STORAGE"
+        ip_address: "10.10.4.1"
+
+      - name: "Mgmt-Forge-Net"
+        nic_name: "nic6"
+        pfsense_name: "MGMT_FORGE"
+        ip_address: "10.10.5.1"
+
+      - name: "Dev-Web-Net"
+        nic_name: "nic7"
         pfsense_name: "DEV_WEB"
         ip_address: "10.20.1.1"
 
       - name: "Dev-Apps-Net"
-        nic_name: "nic6"
+        nic_name: "nic8"
         pfsense_name: "DEV_APPS"
         ip_address: "10.20.2.1"
 
       - name: "Dev-Data-Net"
-        nic_name: "nic7"
+        nic_name: "nic9"
         pfsense_name: "DEV_DATA"
         ip_address: "10.20.3.1"
 
       - name: "Prod-Web-Net"
-        nic_name: "nic8"
+        nic_name: "nic10"
         pfsense_name: "PROD_WEB"
         ip_address: "10.30.1.1"
 
       - name: "Prod-Apps-Net"
-        nic_name: "nic9"
+        nic_name: "nic11"
         pfsense_name: "PROD_APPS"
         ip_address: "10.30.2.1"
 
       - name: "Prod-Data-Net"
-        nic_name: "nic10"
+        nic_name: "nic12"
         pfsense_name: "PROD_DATA"
         ip_address: "10.30.3.1"
 
@@ -226,17 +236,19 @@
           - "  CPU: {{ vm_cpu_sockets }} socket x {{ vm_cpu_cores }} cores"
           - "  Disk: {{ vm_disk_size }} on {{ storage_domain }}"
           - ""
-          - "Network Interfaces (10 total - 3-Tier):"
-          - "  nic1  (em0)    -> ovirtmgmt        WAN          {{ pfsense_wan_ip }} [e1000]"
-          - "  nic2  (vtnet0) -> Mgmt-Core-Net    MGMT_CORE    10.10.1.1  [virtio]"
-          - "  nic3  (vtnet1) -> Mgmt-DevOps-Net  MGMT_DEVOPS  10.10.2.1  [virtio]"
-          - "  nic4  (vtnet2) -> Mgmt-Observ-Net  MGMT_OBSERV  10.10.3.1  [virtio]"
-          - "  nic5  (vtnet3) -> Dev-Web-Net      DEV_WEB      10.20.1.1  [virtio]"
-          - "  nic6  (vtnet4) -> Dev-Apps-Net     DEV_APPS     10.20.2.1  [virtio]"
-          - "  nic7  (vtnet5) -> Dev-Data-Net     DEV_DATA     10.20.3.1  [virtio]"
-          - "  nic8  (vtnet6) -> Prod-Web-Net     PROD_WEB     10.30.1.1  [virtio]"
-          - "  nic9  (vtnet7) -> Prod-Apps-Net    PROD_APPS    10.30.2.1  [virtio]"
-          - "  nic10 (vtnet8) -> Prod-Data-Net    PROD_DATA    10.30.3.1  [virtio]"
+          - "Network Interfaces (12 total - 3-Tier):"
+          - "  nic1  (em0)     -> ovirtmgmt         WAN           {{ pfsense_wan_ip }} [e1000]"
+          - "  nic2  (vtnet0)  -> Mgmt-Core-Net     MGMT_CORE     10.10.1.1  [virtio]"
+          - "  nic3  (vtnet1)  -> Mgmt-DevOps-Net   MGMT_DEVOPS   10.10.2.1  [virtio]"
+          - "  nic4  (vtnet2)  -> Mgmt-Observ-Net   MGMT_OBSERV   10.10.3.1  [virtio]"
+          - "  nic5  (vtnet3)  -> Mgmt-Storage-Net  MGMT_STORAGE  10.10.4.1  [virtio]"
+          - "  nic6  (vtnet4)  -> Mgmt-Forge-Net    MGMT_FORGE    10.10.5.1  [virtio]"
+          - "  nic7  (vtnet5)  -> Dev-Web-Net       DEV_WEB       10.20.1.1  [virtio]"
+          - "  nic8  (vtnet6)  -> Dev-Apps-Net      DEV_APPS      10.20.2.1  [virtio]"
+          - "  nic9  (vtnet7)  -> Dev-Data-Net      DEV_DATA      10.20.3.1  [virtio]"
+          - "  nic10 (vtnet8)  -> Prod-Web-Net      PROD_WEB      10.30.1.1  [virtio]"
+          - "  nic11 (vtnet9)  -> Prod-Apps-Net     PROD_APPS     10.30.2.1  [virtio]"
+          - "  nic12 (vtnet10) -> Prod-Data-Net     PROD_DATA     10.30.3.1  [virtio]"
           - ""
           - "=============================================="
           - "Next Steps:"

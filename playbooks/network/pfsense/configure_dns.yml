@@ -5,6 +5,7 @@
 # This playbook configures:
 #   - DNS domain overrides (forward specific domains to other DNS servers)
 #   - DHCP search domain for short name resolution
+#   - OKD DNS host overrides (api.*, api-int.*, *.apps.*)
 #
 # Prerequisites:
 #   - pfSense VM running with SSH enabled
@@ -20,6 +21,9 @@
 #
 #   # Only update DHCP search domain
 #   ansible-playbook playbooks/network/pfsense/configure_dns.yml --tags dhcp
+#
+#   # Only configure OKD DNS entries
+#   ansible-playbook playbooks/network/pfsense/configure_dns.yml --tags okd
 
 - name: Configure DNS on pfSense
   hosts: pfsense
@@ -66,6 +70,65 @@
             label: "{{ item.interface }} ({{ dns_search_domain }})"
 
     # =========================================================================
+    # PHASE 3: OKD DNS HOST OVERRIDES
+    # =========================================================================
+    - name: "PHASE 3: OKD DNS Configuration"
+      tags: [okd]
+      when: okd_dns_entries is defined
+      block:
+        - name: Configure OKD DNS host overrides via PHP
+          ansible.builtin.raw: |
+            /usr/local/bin/php -r '
+            require_once("config.inc");
+            require_once("unbound.inc");
+            global $config;
+
+            // Host override to add
+            $host = "{{ item.host }}";
+            $domain = "{{ item.domain }}";
+            $ip = "{{ item.ip }}";
+            $descr = "{{ item.descr | default('') }}";
+
+            // Initialize hosts array if not exists
+            if (!isset($config["unbound"]["hosts"])) {
+                $config["unbound"]["hosts"] = array();
+            }
+
+            // Check if entry already exists
+            $found = false;
+            foreach ($config["unbound"]["hosts"] as $key => $entry) {
+                if ($entry["host"] == $host && $entry["domain"] == $domain) {
+                    // Update existing entry
+                    $config["unbound"]["hosts"][$key]["ip"] = $ip;
+                    $config["unbound"]["hosts"][$key]["descr"] = $descr;
+                    $found = true;
+                    break;
+                }
+            }
+
+            // Add new entry if not found
+            if (!$found) {
+                $config["unbound"]["hosts"][] = array(
+                    "host" => $host,
+                    "domain" => $domain,
+                    "ip" => $ip,
+                    "descr" => $descr
+                );
+            }
+
+            write_config("Added DNS host override: " . $host . "." . $domain);
+            services_unbound_configure();
+            echo "Configured: " . $host . "." . $domain . " -> " . $ip;
+            '
+          loop: "{{ okd_dns_entries }}"
+          loop_control:
+            label: "{{ item.host }}.{{ item.domain }} -> {{ item.ip }}"
+          changed_when: true
+
+        # NOTE: Wildcard DNS for *.apps.okd.engatwork.com is handled by CoreDNS
+        # on mgmt-core cluster, not by pfSense domain overrides.
+
+    # =========================================================================
     # SUMMARY
     # =========================================================================
     - name: Display DNS configuration summary
@@ -82,8 +145,14 @@
           - "DHCP Search Domain: {{ dns_search_domain }}"
           - "Configured on {{ dhcp_interfaces | length }} interfaces"
           - ""
+          - "OKD DNS Entries (if configured):"
+          - "{% if okd_dns_entries is defined %}{% for entry in okd_dns_entries %}  {{ entry.host }}.{{ entry.domain }} -> {{ entry.ip }}\n{% endfor %}{% else %}  Not configured{% endif %}"
+          - ""
+          - "OKD Apps Wildcard DNS:"
+          - "  Handled by CoreDNS on mgmt-core cluster (10.10.1.200)"
+          - ""
           - "Next Steps:"
           - "  - VMs need to renew DHCP lease or reboot"
-          - "  - Test: ping mgmt-core-01 (short name)"
-          - "  - Test: dig @10.10.1.200 pfsense.engatwork.com"
+          - "  - Test: dig api.okd.engatwork.com"
+          - "  - Test: dig console-openshift-console.apps.okd.engatwork.com"
           - "=============================================="

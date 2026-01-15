@@ -11,7 +11,7 @@
 
 - name: pfSense Post-Installation
   hosts: engine
-  become: true
+  become: false
   gather_facts: false
 
   vars:
@@ -24,8 +24,10 @@
     pfsense_user: "admin"
     pfsense_password: "unix"
 
-    # VLAN networks that need internet access
+    # VLAN networks that need internet access (11 LAN interfaces)
+    # Interface mapping: em0=WAN, vtnet0-10=LAN interfaces
     vlan_networks:
+      # Management Networks (VLAN 10-14)
       - name: "MGMT_CORE"
         interface: "vtnet0"
         subnet: "10.10.1.0/24"
@@ -38,28 +40,38 @@
         interface: "vtnet2"
         subnet: "10.10.3.0/24"
         gateway: "10.10.3.1"
-      - name: "DEV_WEB"
+      - name: "MGMT_STORAGE"
         interface: "vtnet3"
+        subnet: "10.10.4.0/24"
+        gateway: "10.10.4.1"
+      - name: "MGMT_FORGE"
+        interface: "vtnet4"
+        subnet: "10.10.5.0/24"
+        gateway: "10.10.5.1"
+      # Development Networks (VLAN 20-22)
+      - name: "DEV_WEB"
+        interface: "vtnet5"
         subnet: "10.20.1.0/24"
         gateway: "10.20.1.1"
       - name: "DEV_APPS"
-        interface: "vtnet4"
+        interface: "vtnet6"
         subnet: "10.20.2.0/24"
         gateway: "10.20.2.1"
       - name: "DEV_DATA"
-        interface: "vtnet5"
+        interface: "vtnet7"
         subnet: "10.20.3.0/24"
         gateway: "10.20.3.1"
+      # Production Networks (VLAN 30-32)
       - name: "PROD_WEB"
-        interface: "vtnet6"
+        interface: "vtnet8"
         subnet: "10.30.1.0/24"
         gateway: "10.30.1.1"
       - name: "PROD_APPS"
-        interface: "vtnet7"
+        interface: "vtnet9"
         subnet: "10.30.2.0/24"
         gateway: "10.30.2.1"
       - name: "PROD_DATA"
-        interface: "vtnet8"
+        interface: "vtnet10"
         subnet: "10.30.3.0/24"
         gateway: "10.30.3.1"
 
@@ -155,7 +167,7 @@
         name: "nic{{ item }}"
         linked: true
         state: present
-      loop: "{{ range(1, 11) | list }}"
+      loop: "{{ range(1, 13) | list }}"
       loop_control:
         label: "nic{{ item }}"
 
@@ -195,7 +207,7 @@
           - "  - ISO ejected"
           - "  - Boot order set to HD only"
           - "  - VM started"
-          - "  - All 10 NICs linked"
+          - "  - All 12 NICs linked"
           - "=============================================="
       tags: [vm]
 
@@ -204,7 +216,7 @@
 # =============================================================================
 - name: Configure pfSense Firewall Rules
   hosts: engine
-  become: true
+  become: false
   gather_facts: false
   tags: [firewall]
 
@@ -242,19 +254,81 @@
       ansible.builtin.debug:
         msg: "WAN allow rule: {{ wan_rule.stdout | default('configured') }}"
 
+    # DNS uses UDP, so we need an explicit UDP rule (easyrule default creates TCP with flags S/SA)
+    - name: Add WAN UDP DNS rule (for DNS queries from WAN clients)
+      ansible.builtin.command:
+        cmd: sshpass -p '{{ pfsense_password }}' ssh -o StrictHostKeyChecking=no {{ pfsense_user }}@{{ pfsense_ip }} "easyrule pass wan udp any any 53"
+      register: wan_udp_dns_rule
+      changed_when: "'Rule added' in wan_udp_dns_rule.stdout or wan_udp_dns_rule.rc == 0"
+      failed_when: false
+
+    - name: Display WAN UDP DNS rule result
+      ansible.builtin.debug:
+        msg: "WAN UDP DNS rule: {{ wan_udp_dns_rule.stdout | default('configured') }}"
+
+    - name: Allow oVirt management network (192.168.0.0/24) to access all internal networks
+      ansible.builtin.shell: |
+        sshpass -p '{{ pfsense_password }}' ssh -o StrictHostKeyChecking=no {{ pfsense_user }}@{{ pfsense_ip }} 'cat > /tmp/add_wan_rule.php << "EOFPHP"
+        <?php
+        require_once("config.inc");
+        require_once("filter.inc");
+        global $config;
+
+        $rule = array(
+            "type" => "pass",
+            "interface" => "wan",
+            "ipprotocol" => "inet",
+            "protocol" => "any",
+            "source" => array("network" => "192.168.0.0/24"),
+            "destination" => array("any" => ""),
+            "descr" => "Allow oVirt mgmt network to all internal networks",
+            "tracker" => time()
+        );
+
+        $exists = false;
+        if (isset($config["filter"]["rule"])) {
+            foreach ($config["filter"]["rule"] as $r) {
+                if (isset($r["descr"]) && strpos($r["descr"], "oVirt mgmt network") !== false) {
+                    $exists = true;
+                    break;
+                }
+            }
+        }
+
+        if (!$exists) {
+            array_unshift($config["filter"]["rule"], $rule);
+            write_config("Added WAN rule: Allow 192.168.0.0/24 to all networks");
+            filter_configure();
+            echo "Rule added";
+        } else {
+            echo "Rule already exists";
+        }
+        ?>
+        EOFPHP
+        /usr/local/bin/php /tmp/add_wan_rule.php'
+      register: ovirt_wan_rule
+      changed_when: "'Rule added' in ovirt_wan_rule.stdout"
+
+    - name: Display oVirt WAN rule result
+      ansible.builtin.debug:
+        msg: "oVirt mgmt to internal networks: {{ ovirt_wan_rule.stdout | default('configured') }}"
+
     - name: Add allow-all rules for each LAN interface using easyrule
       ansible.builtin.command:
         cmd: sshpass -p '{{ pfsense_password }}' ssh -o StrictHostKeyChecking=no {{ pfsense_user }}@{{ pfsense_ip }} "easyrule pass {{ item.iface }} any any any"
       loop:
-        - { iface: "lan", name: "MGMT_CORE" }
-        - { iface: "opt1", name: "MGMT_DEVOPS" }
-        - { iface: "opt2", name: "MGMT_OBSERV" }
-        - { iface: "opt3", name: "DEV_WEB" }
-        - { iface: "opt4", name: "DEV_APPS" }
-        - { iface: "opt5", name: "DEV_DATA" }
-        - { iface: "opt6", name: "PROD_WEB" }
-        - { iface: "opt7", name: "PROD_APPS" }
-        - { iface: "opt8", name: "PROD_DATA" }
+        # pfSense interface names: lan=vtnet0, opt1=vtnet1, opt2=vtnet2, etc.
+        - { iface: "lan", name: "MGMT_CORE" }       # vtnet0
+        - { iface: "opt1", name: "MGMT_DEVOPS" }    # vtnet1
+        - { iface: "opt2", name: "MGMT_OBSERV" }    # vtnet2
+        - { iface: "opt3", name: "MGMT_STORAGE" }   # vtnet3
+        - { iface: "opt4", name: "MGMT_FORGE" }     # vtnet4
+        - { iface: "opt5", name: "DEV_WEB" }        # vtnet5
+        - { iface: "opt6", name: "DEV_APPS" }       # vtnet6
+        - { iface: "opt7", name: "DEV_DATA" }       # vtnet7
+        - { iface: "opt8", name: "PROD_WEB" }       # vtnet8
+        - { iface: "opt9", name: "PROD_APPS" }      # vtnet9
+        - { iface: "opt10", name: "PROD_DATA" }     # vtnet10
       loop_control:
         label: "{{ item.name }}"
       register: lan_rules
@@ -288,7 +362,7 @@
 # =============================================================================
 - name: Install HAProxy on pfSense
   hosts: engine
-  become: true
+  become: false
   gather_facts: false
   tags: [packages, haproxy]
 
@@ -298,16 +372,16 @@
     pfsense_password: "unix"
 
   tasks:
-    - name: Check if HAProxy is already installed
+    - name: Check if HAProxy pfSense package is already installed
       ansible.builtin.command:
-        cmd: sshpass -p '{{ pfsense_password }}' ssh -o StrictHostKeyChecking=no {{ pfsense_user }}@{{ pfsense_ip }} "pkg info haproxy-devel"
+        cmd: sshpass -p '{{ pfsense_password }}' ssh -o StrictHostKeyChecking=no {{ pfsense_user }}@{{ pfsense_ip }} "pkg info pfSense-pkg-haproxy-devel"
       register: haproxy_check
       changed_when: false
       failed_when: false
 
-    - name: Install HAProxy package
+    - name: Install HAProxy pfSense package (includes GUI integration)
       ansible.builtin.command:
-        cmd: sshpass -p '{{ pfsense_password }}' ssh -o StrictHostKeyChecking=no {{ pfsense_user }}@{{ pfsense_ip }} "pkg install -y haproxy-devel"
+        cmd: sshpass -p '{{ pfsense_password }}' ssh -o StrictHostKeyChecking=no {{ pfsense_user }}@{{ pfsense_ip }} "pkg install -y pfSense-pkg-haproxy-devel"
       register: haproxy_install
       when: haproxy_check.rc != 0
       changed_when: "'Installed' in haproxy_install.stdout or haproxy_install.rc == 0"
@@ -321,7 +395,7 @@
 # =============================================================================
 - name: Configure Routes on Engine Host
   hosts: engine
-  become: true
+  become: false
   gather_facts: false
   tags: [routes]
 
@@ -330,15 +404,12 @@
 
   tasks:
     - name: Add routes to VLAN networks via pfSense
-      ansible.builtin.shell: |
-        # Add routes if they don't exist
-        ip route show | grep -q "10.10.0.0/16 via {{ pfsense_ip }}" || \
-          ip route add 10.10.0.0/16 via {{ pfsense_ip }}
-        ip route show | grep -q "10.20.0.0/16 via {{ pfsense_ip }}" || \
-          ip route add 10.20.0.0/16 via {{ pfsense_ip }}
-        ip route show | grep -q "10.30.0.0/16 via {{ pfsense_ip }}" || \
-          ip route add 10.30.0.0/16 via {{ pfsense_ip }}
-        echo "Routes configured"
+      ansible.builtin.shell:
+        cmd: |
+          ip route show | grep -q "10.10.0.0/16 via {{ pfsense_ip }}" || ip route add 10.10.0.0/16 via {{ pfsense_ip }}
+          ip route show | grep -q "10.20.0.0/16 via {{ pfsense_ip }}" || ip route add 10.20.0.0/16 via {{ pfsense_ip }}
+          ip route show | grep -q "10.30.0.0/16 via {{ pfsense_ip }}" || ip route add 10.30.0.0/16 via {{ pfsense_ip }}
+          echo "Routes configured"
       register: routes_result
       changed_when: "'Routes configured' in routes_result.stdout"
 
@@ -395,24 +466,27 @@
           - "pfSense Post-Installation Complete"
           - "=============================================="
           - ""
-          - "pfSense Interfaces (3-Tier):"
-          - "  WAN (em0):            192.168.0.101/24 GW: 192.168.0.1"
-          - "  MGMT_CORE (vtnet0):   10.10.1.1/24"
-          - "  MGMT_DEVOPS (vtnet1): 10.10.2.1/24"
-          - "  MGMT_OBSERV (vtnet2): 10.10.3.1/24"
-          - "  DEV_WEB (vtnet3):     10.20.1.1/24"
-          - "  DEV_APPS (vtnet4):    10.20.2.1/24"
-          - "  DEV_DATA (vtnet5):    10.20.3.1/24"
-          - "  PROD_WEB (vtnet6):    10.30.1.1/24"
-          - "  PROD_APPS (vtnet7):   10.30.2.1/24"
-          - "  PROD_DATA (vtnet8):   10.30.3.1/24"
+          - "pfSense Interfaces (12 total: 1 WAN + 11 LAN):"
+          - "  WAN (em0):              192.168.0.101/24 GW: 192.168.0.1"
+          - "  MGMT_CORE (vtnet0):     10.10.1.1/24  (lan)"
+          - "  MGMT_DEVOPS (vtnet1):   10.10.2.1/24  (opt1)"
+          - "  MGMT_OBSERV (vtnet2):   10.10.3.1/24  (opt2)"
+          - "  MGMT_STORAGE (vtnet3):  10.10.4.1/24  (opt3)"
+          - "  MGMT_FORGE (vtnet4):    10.10.5.1/24  (opt4)"
+          - "  DEV_WEB (vtnet5):       10.20.1.1/24  (opt5)"
+          - "  DEV_APPS (vtnet6):      10.20.2.1/24  (opt6)"
+          - "  DEV_DATA (vtnet7):      10.20.3.1/24  (opt7)"
+          - "  PROD_WEB (vtnet8):      10.30.1.1/24  (opt8)"
+          - "  PROD_APPS (vtnet9):     10.30.2.1/24  (opt9)"
+          - "  PROD_DATA (vtnet10):    10.30.3.1/24  (opt10)"
           - ""
           - "Firewall Rules:"
           - "  - All VLAN interfaces allow outbound traffic"
+          - "  - WAN UDP port 53 open (for DNS queries)"
           - "  - NAT configured for internet access"
           - ""
           - "Packages:"
-          - "  - HAProxy (haproxy-devel) installed"
+          - "  - HAProxy (pfSense-pkg-haproxy-devel) installed"
           - ""
           - "Engine Host Routes:"
           - "  10.10.0.0/16 via 192.168.0.101"
