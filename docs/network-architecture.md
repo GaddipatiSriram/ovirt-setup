@@ -291,6 +291,21 @@ Prod-App-VM1 ───▶ pfSense ───▶ Prod-App-VM2
 | Mgmt-Observ → ALL:9090,9100,3100          | ALLOW  | Prometheus/Loki scraping     |
 | ALL → Mgmt-Core:53,123,389,636            | ALLOW  | DNS, NTP, and LDAP           |
 | ALL → WAN (Outbound)                      | ALLOW  | Internet access (NAT)        |
+| **Floating (all internal interfaces)**   |        |                              |
+| Pass-out any                              | ALLOW  | Permits return traffic       |
+| LAN (MGMT_CORE) any → any                 | ALLOW  | Full management access       |
+| OPT1 (MGMT_DEVOPS) any → any              | ALLOW  | Full devops access           |
+
+### DNS Rebind Protection Exceptions
+
+pfSense blocks DNS responses that resolve external names to private (RFC1918)
+addresses. The internal domain `engatwork.com` intentionally resolves to
+private IPs via CoreDNS, so it is added to the rebind-exception list — without
+this, clients behind pfSense cannot resolve internal hostnames.
+
+| Domain          | Reason                                                  |
+|-----------------|---------------------------------------------------------|
+| engatwork.com   | Internal domain, resolves to 10.10.0.0/16 via CoreDNS  |
 
 ## Traffic Summary
 
@@ -310,7 +325,7 @@ Prod-App-VM1 ───▶ pfSense ───▶ Prod-App-VM2
 2. **Deploy pfSense VM** - `ansible-playbook -i inventory.ini network/configure_pfsense_vm.yml`
 3. **Post-install pfSense** - `ansible-playbook -i inventory.ini network/configure_pfsense_vm.yml --tags post_install_pfsense`
 4. **Configure pfSense**:
-   - Assign interfaces (WAN, MGMT_CORE, MGMT_DEVOPS, MGMT_OBSERV, DEV_WEB, DEV_APPS, DEV_DATA, PROD_WEB, PROD_APPS, PROD_DATA)
+   - Assign interfaces (WAN, MGMT_CORE, MGMT_DEVOPS, MGMT_OBSERV, MGMT_STORAGE, MGMT_FORGE, DEV_WEB, DEV_APPS, DEV_DATA, PROD_WEB, PROD_APPS, PROD_DATA)
    - Set static IPs on each interface
    - Create interface groups (MGMT_GROUP, DEV_GROUP, PROD_GROUP, WEB_GROUP, APPS_GROUP, DATA_GROUP)
    - Enable DHCP on each interface

@@ -147,6 +147,11 @@ acls:
 # Firewall Rules
 # - Allow inter-VLAN routing
 # - NAT outbound to WAN
+# - Floating pass-out rule on all internal interfaces
+# - Allow-all rules on LAN / OPT1 (MGMT_CORE, MGMT_DEVOPS)
+
+# DNS Rebind Protection Exceptions
+# - engatwork.com (internal domain may resolve to RFC1918 addresses)
 ```
 
 ## Configuration Variables

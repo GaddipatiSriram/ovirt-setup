@@ -144,6 +144,22 @@ All LAN interfaces have DHCP enabled with the following ranges:
 | AppPorts | port | 8080, 8443 |
 | DatabasePorts | port | 5432, 3306, 27017, 6379, 9200, 9092 |
 
+### Floating Rules
+
+A floating pass-out rule is applied to all internal interfaces so return traffic
+is permitted without duplicating per-interface rules. LAN (MGMT_CORE) and OPT1
+(MGMT_DEVOPS) also carry allow-all rules so management hosts can reach every
+other VLAN and the internet without per-port openings. See
+`pfsense/vars/pfsense_config.yml` (`pfsense_floating_rules`).
+
+### DNS Rebind Exceptions
+
+pfSense's DNS rebind protection drops responses that contain RFC1918 addresses.
+Because `engatwork.com` resolves to private IPs via the internal CoreDNS
+forwarder, it is added to the rebind-exception list; without this, clients
+behind pfSense cannot resolve internal hostnames. See
+`pfsense/vars/dns_config.yml` (`dns_rebind_exceptions`).
+
 ## Usage
 
 ### Step 1: Install pfSense VM
