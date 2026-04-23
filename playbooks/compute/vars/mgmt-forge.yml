@@ -9,6 +9,9 @@
 # workload for the forge stack is ~15-17 GiB of RAM requests across the 3 nodes
 # plus 30+ GiB of image/registry/PVC storage per node. medium (2 GiB) and
 # large (4 GiB) are both too small.
+#
+# Network: MGMT_FORGE (VLAN 14, 10.10.5.0/24)
+# Gateway: 10.10.5.1 (pfSense)
 
 # VM naming
 vm_prefix: "mgmt-forge"

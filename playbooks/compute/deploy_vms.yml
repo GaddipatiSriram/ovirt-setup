@@ -9,7 +9,7 @@
 
 - name: Deploy VMs from Template
   hosts: engine
-  become: true
+  become: false
   gather_facts: false
 
   vars:
@@ -54,9 +54,17 @@
         memory_guaranteed: 16GiB
         cpu_cores: 8
         disk_size: 120GiB
+      storage:
+        memory: 16GiB
+        memory_guaranteed: 8GiB
+        cpu_cores: 4
+        disk_size: 50GiB
 
     # Network (default from template, or override)
-    # Options: Mgmt-Core-Net, Mgmt-DevOps-Net, Mgmt-Observ-Net, Dev-Apps-Net, Dev-Data-Net, Prod-Apps-Net, Prod-Data-Net
+    # Options:
+    #   Mgmt: Mgmt-Core-Net, Mgmt-DevOps-Net, Mgmt-Observ-Net, Mgmt-Storage-Net, Mgmt-Forge-Net
+    #   Dev:  Dev-Web-Net, Dev-Apps-Net, Dev-Data-Net
+    #   Prod: Prod-Web-Net, Prod-Apps-Net, Prod-Data-Net
     network_name: ""
 
     # Cloud-init settings

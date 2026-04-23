@@ -1,0 +1,35 @@
+---
+# MGMT Storage VMs - 3 VMs on MGMT_STORAGE network (10.10.4.0/24)
+# Usage: ansible-playbook deploy_vms.yml -e @vars/mgmt-storage.yml
+#
+# These VMs run Rook-Ceph to provide storage services to all K8s clusters:
+#   - CephFS (NFS export for RWX)
+#   - RBD (block storage)
+#   - RGW (S3-compatible object storage)
+#
+# Network: MGMT_STORAGE (VLAN 13, 10.10.4.0/24)
+# Gateway: 10.10.4.1 (pfSense)
+
+# VM naming
+vm_prefix: "mgmt-storage"
+vm_count: 3
+
+# VM size - storage nodes need more resources for Ceph
+vm_size: "storage"
+
+# Network - VLAN 13
+network_name: "Mgmt-Storage-Net"
+
+# Template
+template_name: "fedora-41-mgmt"
+
+# Cloud-init
+root_password: "unix"
+admin_user: "admin"
+admin_password: "unix"
+domain: "engatwork.com"
+
+# Storage-specific: Additional disks for OSDs (added separately)
+# Each node should have:
+#   - 50GB OS disk (from template)
+#   - 100GB+ OSD disk (added after VM creation)

@@ -94,13 +94,21 @@ Deploys multiple VMs from template:
 template_name: "fedora-41-mgmt"
 vm_prefix: "fedora-mgmt"
 vm_count: 3
-vm_size: "medium"  # small, medium, large
+vm_size: "medium"  # small, medium, large, okd, sno, storage
 
 # Size definitions
 vm_sizes:
-  small:   { memory: 1GiB, cpu_cores: 1, disk: 20GiB }
-  medium:  { memory: 2GiB, cpu_cores: 2, disk: 40GiB }
-  large:   { memory: 4GiB, cpu_cores: 4, disk: 80GiB }
+  small:   { memory: 1GiB,  cpu_cores: 1, disk: 20GiB }
+  medium:  { memory: 2GiB,  cpu_cores: 2, disk: 40GiB }
+  large:   { memory: 4GiB,  cpu_cores: 4, disk: 80GiB }
+  okd:     { memory: 16GiB, cpu_cores: 4, disk: 120GiB }
+  sno:     { memory: 32GiB, cpu_cores: 8, disk: 120GiB }
+  storage: { memory: 16GiB, cpu_cores: 4, disk: 50GiB }
+
+# Network options
+#   Mgmt: Mgmt-Core-Net, Mgmt-DevOps-Net, Mgmt-Observ-Net, Mgmt-Storage-Net, Mgmt-Forge-Net
+#   Dev:  Dev-Web-Net, Dev-Apps-Net, Dev-Data-Net
+#   Prod: Prod-Web-Net, Prod-Apps-Net, Prod-Data-Net
 ```
 
 ## Default Credentials

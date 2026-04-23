@@ -3,10 +3,10 @@
 ## Overview
 
 This document describes the 3-tier network architecture for the oVirt virtualization environment.
-- **3 Management Networks** - Core infrastructure, DevOps, Observability
+- **5 Management Networks** - Core, DevOps, Observability, Storage, Forge
 - **3 Development Networks** - Web, Apps, and Data
 - **3 Production Networks** - Web, Apps, and Data
-- **Total: 9 networks + WAN = 10 pfSense interfaces**
+- **Total: 11 networks + WAN = 12 pfSense interfaces**
 
 ## Network Diagram
 
@@ -30,6 +30,8 @@ This document describes the 3-tier network architecture for the oVirt virtualiza
 │                         │  MGMT_CORE ───── 10.10.1.1      │                          │
 │                         │  MGMT_DEVOPS ─── 10.10.2.1      │                          │
 │                         │  MGMT_OBSERV ─── 10.10.3.1      │                          │
+│                         │  MGMT_STORAGE ── 10.10.4.1      │                          │
+│                         │  MGMT_FORGE ──── 10.10.5.1      │                          │
 │                         │  DEV_WEB ─────── 10.20.1.1      │                          │
 │                         │  DEV_APPS ────── 10.20.2.1      │                          │
 │                         │  DEV_DATA ────── 10.20.3.1      │                          │
@@ -48,23 +50,23 @@ This document describes the 3-tier network architecture for the oVirt virtualiza
 │         │                               │                               │            │
 │         ▼                               ▼                               ▼            │
 │  ┌─────────────────────┐    ┌─────────────────────┐    ┌─────────────────────┐      │
-│  │ MANAGEMENT (3 nets) │    │ DEVELOPMENT (3 nets)│    │ PRODUCTION (3 nets) │      │
+│  │ MANAGEMENT (5 nets) │    │ DEVELOPMENT (3 nets)│    │ PRODUCTION (3 nets) │      │
 │  ├─────────────────────┤    ├─────────────────────┤    ├─────────────────────┤      │
 │  │                     │    │                     │    │                     │      │
 │  │ ┌─────────────────┐ │    │ ┌─────────────────┐ │    │ ┌─────────────────┐ │      │
 │  │ │ Mgmt-Core       │ │    │ │ Dev-Web         │ │    │ │ Prod-Web        │ │      │
 │  │ │ 10.10.1.0/24    │ │    │ │ 10.20.1.0/24    │ │    │ │ 10.30.1.0/24    │ │      │
 │  │ │ VLAN 10         │ │    │ │ VLAN 20         │ │    │ │ VLAN 30         │ │      │
-│  │ │ DNS, NTP, LDAP  │ │    │ │ Ingress, nginx  │ │    │ │ Ingress, nginx  │ │      │
-│  │ │ Bastion, VPN    │ │    │ │ HAProxy, CDN    │ │    │ │ HAProxy, CDN    │ │      │
+│  │ │ DNS, Keycloak   │ │    │ │ Ingress, nginx  │ │    │ │ Ingress, nginx  │ │      │
+│  │ │ Vault           │ │    │ │ HAProxy, CDN    │ │    │ │ HAProxy, CDN    │ │      │
 │  │ └─────────────────┘ │    │ └─────────────────┘ │    │ └─────────────────┘ │      │
 │  │                     │    │         │           │    │         │           │      │
 │  │ ┌─────────────────┐ │    │         ▼           │    │         ▼           │      │
 │  │ │ Mgmt-DevOps     │ │    │ ┌─────────────────┐ │    │ ┌─────────────────┐ │      │
 │  │ │ 10.10.2.0/24    │ │    │ │ Dev-Apps        │ │    │ │ Prod-Apps       │ │      │
-│  │ │ VLAN 11         │ │    │ │ 10.20.2.0/24    │ │    │ │ 10.30.2.0/24    │ │      │
-│  │ │ ArgoCD, Jenkins │ │    │ │ VLAN 21         │ │    │ │ VLAN 31         │ │      │
-│  │ │ GitLab, Harbor  │ │    │ │ API, Services   │ │    │ │ API, Services   │ │      │
+│  │ │ VLAN 11 (OKD)   │ │    │ │ 10.20.2.0/24    │ │    │ │ 10.30.2.0/24    │ │      │
+│  │ │ ArgoCD, OCM     │ │    │ │ VLAN 21         │ │    │ │ VLAN 31         │ │      │
+│  │ │ Backstage       │ │    │ │ API, Services   │ │    │ │ API, Services   │ │      │
 │  │ └─────────────────┘ │    │ │ K8s Workers     │ │    │ │ K8s Workers     │ │      │
 │  │                     │    │ └─────────────────┘ │    │ └─────────────────┘ │      │
 │  │ ┌─────────────────┐ │    │         │           │    │         │           │      │
@@ -75,8 +77,21 @@ This document describes the 3-tier network architecture for the oVirt virtualiza
 │  │ │ Loki, Tempo     │ │    │ │ VLAN 22         │ │    │ │ VLAN 32         │ │      │
 │  │ └─────────────────┘ │    │ │ PostgreSQL      │ │    │ │ PostgreSQL      │ │      │
 │  │                     │    │ │ Redis, Kafka    │ │    │ │ Redis, Kafka    │ │      │
-│  │                     │    │ │ Elasticsearch   │ │    │ │ Elasticsearch   │ │      │
-│  │                     │    │ └─────────────────┘ │    │ └─────────────────┘ │      │
+│  │ ┌─────────────────┐ │    │ │ Elasticsearch   │ │    │ │ Elasticsearch   │ │      │
+│  │ │ Mgmt-Storage    │ │    │ └─────────────────┘ │    │ └─────────────────┘ │      │
+│  │ │ 10.10.4.0/24    │ │    │                     │    │                     │      │
+│  │ │ VLAN 13         │ │    │                     │    │                     │      │
+│  │ │ Rook-Ceph       │ │    │                     │    │                     │      │
+│  │ │ NFS, S3, RBD    │ │    │                     │    │                     │      │
+│  │ └─────────────────┘ │    │                     │    │                     │      │
+│  │                     │    │                     │    │                     │      │
+│  │ ┌─────────────────┐ │    │                     │    │                     │      │
+│  │ │ Mgmt-Forge      │ │    │                     │    │                     │      │
+│  │ │ 10.10.5.0/24    │ │    │                     │    │                     │      │
+│  │ │ VLAN 14         │ │    │                     │    │                     │      │
+│  │ │ GitLab, Harbor  │ │    │                     │    │                     │      │
+│  │ │ SonarQube       │ │    │                     │    │                     │      │
+│  │ └─────────────────┘ │    │                     │    │                     │      │
 │  └─────────────────────┘    └─────────────────────┘    └─────────────────────┘      │
 │                                                                                      │
 └──────────────────────────────────────────────────────────────────────────────────────┘
@@ -92,10 +107,12 @@ This document describes the 3-tier network architecture for the oVirt virtualiza
 │  │                  Linux Bridges                       │   │
 │  │   VLAN networks on eno1 (802.1q tagged)             │   │
 │  │                                                      │   │
-│  │  VLAN 10 ──┬── pfSense VM (10 interfaces)           │   │
+│  │  VLAN 10 ──┬── pfSense VM (12 interfaces)           │   │
 │  │  VLAN 11 ──┤                                         │   │
 │  │  VLAN 12 ──┤   All inter-VLAN traffic goes          │   │
-│  │  VLAN 20 ──┤   through pfSense for routing          │   │
+│  │  VLAN 13 ──┤   through pfSense for routing          │   │
+│  │  VLAN 14 ──┤                                         │   │
+│  │  VLAN 20 ──┤                                         │   │
 │  │  VLAN 21 ──┤                                         │   │
 │  │  VLAN 22 ──┤                                         │   │
 │  │  VLAN 30 ──┤                                         │   │
@@ -195,26 +212,30 @@ Prod-App-VM1 ───▶ pfSense ───▶ Prod-App-VM2
 
 ### pfSense Interface Configuration
 
-| pfSense Name | vtnet   | oVirt NIC | oVirt Network    | IP Address        | Purpose                    |
-|--------------|---------|-----------|------------------|-------------------|----------------------------|
-| WAN          | vtnet0  | nic1      | ovirtmgmt        | 192.168.0.101/24  | Internet uplink (DHCP)     |
-| MGMT_CORE    | vtnet1  | nic2      | Mgmt-Core-Net    | 10.10.1.1/24      | Core infrastructure        |
-| MGMT_DEVOPS  | vtnet2  | nic3      | Mgmt-DevOps-Net  | 10.10.2.1/24      | CI/CD, GitOps              |
-| MGMT_OBSERV  | vtnet3  | nic4      | Mgmt-Observ-Net  | 10.10.3.1/24      | Monitoring, Logging        |
-| DEV_WEB      | vtnet4  | nic5      | Dev-Web-Net      | 10.20.1.1/24      | Dev web/ingress tier       |
-| DEV_APPS     | vtnet5  | nic6      | Dev-Apps-Net     | 10.20.2.1/24      | Dev applications           |
-| DEV_DATA     | vtnet6  | nic7      | Dev-Data-Net     | 10.20.3.1/24      | Dev databases              |
-| PROD_WEB     | vtnet7  | nic8      | Prod-Web-Net     | 10.30.1.1/24      | Prod web/ingress tier      |
-| PROD_APPS    | vtnet8  | nic9      | Prod-Apps-Net    | 10.30.2.1/24      | Prod applications          |
-| PROD_DATA    | vtnet9  | nic10     | Prod-Data-Net    | 10.30.3.1/24      | Prod databases             |
+| pfSense Name | vtnet    | oVirt NIC | oVirt Network      | IP Address        | Purpose                    |
+|--------------|----------|-----------|---------------------|-------------------|----------------------------|
+| WAN          | em0      | nic1      | ovirtmgmt           | 192.168.0.101/24  | Internet uplink (DHCP)     |
+| MGMT_CORE    | vtnet0   | nic2      | Mgmt-Core-Net       | 10.10.1.1/24      | Core (DNS, Keycloak, Vault)|
+| MGMT_DEVOPS  | vtnet1   | nic3      | Mgmt-DevOps-Net     | 10.10.2.1/24      | OKD, ArgoCD, OCM           |
+| MGMT_OBSERV  | vtnet2   | nic4      | Mgmt-Observ-Net     | 10.10.3.1/24      | Monitoring, Logging        |
+| MGMT_STORAGE | vtnet3   | nic5      | Mgmt-Storage-Net    | 10.10.4.1/24      | Rook-Ceph storage          |
+| MGMT_FORGE   | vtnet4   | nic6      | Mgmt-Forge-Net      | 10.10.5.1/24      | GitLab, Harbor, SonarQube  |
+| DEV_WEB      | vtnet5   | nic7      | Dev-Web-Net         | 10.20.1.1/24      | Dev web/ingress tier       |
+| DEV_APPS     | vtnet6   | nic8      | Dev-Apps-Net        | 10.20.2.1/24      | Dev applications           |
+| DEV_DATA     | vtnet7   | nic9      | Dev-Data-Net        | 10.20.3.1/24      | Dev databases              |
+| PROD_WEB     | vtnet8   | nic10     | Prod-Web-Net        | 10.30.1.1/24      | Prod web/ingress tier      |
+| PROD_APPS    | vtnet9   | nic11     | Prod-Apps-Net       | 10.30.2.1/24      | Prod applications          |
+| PROD_DATA    | vtnet10  | nic12     | Prod-Data-Net       | 10.30.3.1/24      | Prod databases             |
 
 ### Network to VLAN Mapping
 
 | Network          | VLAN | Subnet         | DHCP Range            | Purpose                              |
 |------------------|------|----------------|----------------------|--------------------------------------|
-| Mgmt-Core-Net    | 10   | 10.10.1.0/24   | 10.10.1.100-200      | DNS, NTP, LDAP, Bastion, VPN         |
-| Mgmt-DevOps-Net  | 11   | 10.10.2.0/24   | 10.10.2.100-200      | ArgoCD, Jenkins, GitLab, Harbor      |
-| Mgmt-Observ-Net  | 12   | 10.10.3.0/24   | 10.10.3.100-200      | Grafana, Prometheus, Loki, Tempo     |
+| Mgmt-Core-Net    | 10   | 10.10.1.0/24   | 10.10.1.100-200      | CoreDNS, Keycloak, Vault             |
+| Mgmt-DevOps-Net  | 11   | 10.10.2.0/24   | 10.10.2.100-200      | OKD, ArgoCD, OCM, Backstage          |
+| Mgmt-Observ-Net  | 12   | 10.10.3.0/24   | 10.10.3.100-200      | Prometheus, Grafana, Loki, Tempo     |
+| Mgmt-Storage-Net | 13   | 10.10.4.0/24   | 10.10.4.100-200      | Rook-Ceph, NFS, S3, RBD              |
+| Mgmt-Forge-Net   | 14   | 10.10.5.0/24   | 10.10.5.100-200      | GitLab, Harbor, SonarQube            |
 | Dev-Web-Net      | 20   | 10.20.1.0/24   | 10.20.1.100-200      | Ingress, nginx, HAProxy, CDN cache   |
 | Dev-Apps-Net     | 21   | 10.20.2.0/24   | 10.20.2.100-200      | API servers, microservices, K8s      |
 | Dev-Data-Net     | 22   | 10.20.3.0/24   | 10.20.3.100-200      | PostgreSQL, Redis, Kafka, ES         |
@@ -237,14 +258,14 @@ Prod-App-VM1 ───▶ pfSense ───▶ Prod-App-VM2
 
 ### Interface Groups
 
-| Group      | Interfaces                              | Purpose                    |
-|------------|-----------------------------------------|----------------------------|
-| MGMT_GROUP | MGMT_CORE, MGMT_DEVOPS, MGMT_OBSERV     | All Management networks    |
-| DEV_GROUP  | DEV_WEB, DEV_APPS, DEV_DATA             | All Development networks   |
-| PROD_GROUP | PROD_WEB, PROD_APPS, PROD_DATA          | All Production networks    |
-| WEB_GROUP  | DEV_WEB, PROD_WEB                       | All Web tier networks      |
-| APPS_GROUP | DEV_APPS, PROD_APPS                     | All Apps tier networks     |
-| DATA_GROUP | DEV_DATA, PROD_DATA                     | All Data tier networks     |
+| Group      | Interfaces                                            | Purpose                    |
+|------------|-------------------------------------------------------|----------------------------|
+| MGMT_GROUP | MGMT_CORE, MGMT_DEVOPS, MGMT_OBSERV, MGMT_STORAGE, MGMT_FORGE | All Management networks    |
+| DEV_GROUP  | DEV_WEB, DEV_APPS, DEV_DATA                           | All Development networks   |
+| PROD_GROUP | PROD_WEB, PROD_APPS, PROD_DATA                        | All Production networks    |
+| WEB_GROUP  | DEV_WEB, PROD_WEB                                     | All Web tier networks      |
+| APPS_GROUP | DEV_APPS, PROD_APPS                                   | All Apps tier networks     |
+| DATA_GROUP | DEV_DATA, PROD_DATA                                   | All Data tier networks     |
 
 ### Firewall Rules
 
@@ -298,11 +319,18 @@ Prod-App-VM1 ───▶ pfSense ───▶ Prod-App-VM2
 
 ## Changes from Previous Architecture
 
-| Before (7 networks)          | After (9 networks - 3-Tier)  |
-|------------------------------|------------------------------|
-| 3 Management networks        | 3 Management networks        |
-| 2 Development networks       | 3 Development networks (Web/Apps/Data) |
-| 2 Production networks        | 3 Production networks (Web/Apps/Data)  |
-| 8 pfSense interfaces         | 10 pfSense interfaces        |
-| Apps+Web combined            | Separate Web tier for ingress |
-| Simplified firewall rules    | 3-tier isolation rules       |
+| Before (9 networks)          | After (11 networks)           |
+|------------------------------|-------------------------------|
+| 3 Management networks        | 5 Management networks         |
+| 3 Development networks       | 3 Development networks        |
+| 3 Production networks        | 3 Production networks         |
+| 10 pfSense interfaces        | 12 pfSense interfaces         |
+| Storage on mgmt-core         | Dedicated mgmt-storage cluster|
+| GitLab on mgmt-devops        | Dedicated mgmt-forge cluster  |
+
+### New Networks Added
+
+| Network          | Purpose                                      |
+|------------------|----------------------------------------------|
+| Mgmt-Storage-Net | Rook-Ceph storage services (NFS, S3, RBD)   |
+| Mgmt-Forge-Net   | Software forge (GitLab, Harbor, SonarQube)  |

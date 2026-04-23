@@ -13,34 +13,38 @@ This project automates the complete setup of an oVirt virtualization environment
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                    Physical Host (Rocky Linux 9)                     │
-│                      node.engatwork.com                             │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                      │
-│  ┌──────────────────────────────────────────────────────────────┐   │
-│  │                     oVirt Engine                              │   │
-│  │                  ovirt.engatwork.com                         │   │
-│  │                    (Hosted Engine)                           │   │
-│  └──────────────────────────────────────────────────────────────┘   │
-│                                                                      │
-│  Networks (VLANs):                                                  │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐                 │
-│  │ Mgmt-Core   │  │ Mgmt-DevOps │  │ Mgmt-Observ │                 │
-│  │ 10.10.1.0/24│  │ 10.10.2.0/24│  │ 10.10.3.0/24│                 │
-│  │ VLAN 101    │  │ VLAN 102    │  │ VLAN 103    │                 │
-│  └─────────────┘  └─────────────┘  └─────────────┘                 │
-│                                                                      │
-│  ┌──────────────────────────────────────────────────────────────┐   │
-│  │                      pfSense VM                               │   │
-│  │                   Gateway & Firewall                          │   │
-│  │                                                               │   │
-│  │  WAN: 192.168.0.101  ←→  Internet                            │   │
-│  │  LAN: 10.10.1.1, 10.10.2.1, 10.10.3.1                        │   │
-│  └──────────────────────────────────────────────────────────────┘   │
-│                                                                      │
-│  Storage: Direct LUN (iSCSI/FC)                                     │
-└─────────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────────┐
+│                       Physical Host (Rocky Linux 9)                         │
+│                         node.engatwork.com                                  │
+├────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ┌───────────────────────────────────────────────────────────────────┐     │
+│  │                        oVirt Engine                                │     │
+│  │                     ovirt.engatwork.com                           │     │
+│  │                       (Hosted Engine)                             │     │
+│  └───────────────────────────────────────────────────────────────────┘     │
+│                                                                             │
+│  Management Networks (VLAN 10-14):                                         │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐         │
+│  │Mgmt-Core │ │Mgmt-DevOp│ │Mgmt-Obsrv│ │Mgmt-Strg │ │Mgmt-Forge│         │
+│  │10.10.1.0 │ │10.10.2.0 │ │10.10.3.0 │ │10.10.4.0 │ │10.10.5.0 │         │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────┘         │
+│                                                                             │
+│  Dev Networks (VLAN 20-22):        Prod Networks (VLAN 30-32):             │
+│  ┌──────────┐ ┌──────────┐ ┌─────┐ ┌──────────┐ ┌──────────┐ ┌─────┐      │
+│  │ Dev-Web  │ │ Dev-Apps │ │Data │ │ Prod-Web │ │Prod-Apps │ │Data │      │
+│  │10.20.1.0 │ │10.20.2.0 │ │.3.0 │ │10.30.1.0 │ │10.30.2.0 │ │.3.0 │      │
+│  └──────────┘ └──────────┘ └─────┘ └──────────┘ └──────────┘ └─────┘      │
+│                                                                             │
+│  ┌───────────────────────────────────────────────────────────────────┐     │
+│  │                         pfSense VM                                 │     │
+│  │                      Gateway & Firewall                            │     │
+│  │                                                                    │     │
+│  │  WAN: 192.168.0.101 ←→ Internet     12 Interfaces (1 WAN + 11 LAN)│     │
+│  └───────────────────────────────────────────────────────────────────┘     │
+│                                                                             │
+│  Storage: Direct LUN (iSCSI/FC)                                            │
+└────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Project Structure
@@ -109,16 +113,21 @@ ansible-playbook playbooks/compute/deploy_vms.yml
 
 ## Network Configuration
 
-### VLANs
+### VLANs (11 Networks)
 
 | Network | VLAN | CIDR | Gateway | Purpose |
 |---------|------|------|---------|---------|
-| Mgmt-Core-Net | 101 | 10.10.1.0/24 | 10.10.1.1 | Core services (DNS, K8s) |
-| Mgmt-DevOps-Net | 102 | 10.10.2.0/24 | 10.10.2.1 | DevOps, OKD cluster |
-| Mgmt-Observ-Net | 103 | 10.10.3.0/24 | 10.10.3.1 | Monitoring stack |
-| Dev-Web-Net | 110 | 10.10.10.0/24 | 10.10.10.1 | Dev web tier |
-| Dev-Apps-Net | 120 | 10.10.20.0/24 | 10.10.20.1 | Dev app tier |
-| Dev-Data-Net | 130 | 10.10.30.0/24 | 10.10.30.1 | Dev data tier |
+| Mgmt-Core-Net | 10 | 10.10.1.0/24 | 10.10.1.1 | Foundational (DNS, Keycloak, Vault) |
+| Mgmt-DevOps-Net | 11 | 10.10.2.0/24 | 10.10.2.1 | OKD cluster (ArgoCD, OCM) |
+| Mgmt-Observ-Net | 12 | 10.10.3.0/24 | 10.10.3.1 | Monitoring (Prometheus, Grafana) |
+| Mgmt-Storage-Net | 13 | 10.10.4.0/24 | 10.10.4.1 | Storage (Rook-Ceph) |
+| Mgmt-Forge-Net | 14 | 10.10.5.0/24 | 10.10.5.1 | Software forge (GitLab, Harbor) |
+| Dev-Web-Net | 20 | 10.20.1.0/24 | 10.20.1.1 | Dev web tier |
+| Dev-Apps-Net | 21 | 10.20.2.0/24 | 10.20.2.1 | Dev app tier |
+| Dev-Data-Net | 22 | 10.20.3.0/24 | 10.20.3.1 | Dev data tier |
+| Prod-Web-Net | 30 | 10.30.1.0/24 | 10.30.1.1 | Prod web tier |
+| Prod-Apps-Net | 31 | 10.30.2.0/24 | 10.30.2.1 | Prod app tier |
+| Prod-Data-Net | 32 | 10.30.3.0/24 | 10.30.3.1 | Prod data tier |
 
 ### pfSense Configuration
 
