@@ -1,0 +1,30 @@
+---
+# MGMT Forge VMs - 3 VMs on MGMT_FORGE network (10.10.5.0/24)
+# Usage: ansible-playbook deploy_vms.yml -e @vars/mgmt-forge.yml
+#
+# Purpose: software forge cluster — Harbor, SonarQube, Keycloak, Vault,
+# cert-manager, external-secrets, GH Actions runners, Argo Workflows, Tekton.
+#
+# Sized at vm_size=okd (16 GiB / 120 GiB / 4 cores) because the steady-state
+# workload for the forge stack is ~15-17 GiB of RAM requests across the 3 nodes
+# plus 30+ GiB of image/registry/PVC storage per node. medium (2 GiB) and
+# large (4 GiB) are both too small.
+
+# VM naming
+vm_prefix: "mgmt-forge"
+vm_count: 3
+
+# VM size — OKD preset: 16 GiB RAM, 4 cores, 120 GiB disk
+vm_size: "okd"
+
+# Network — VLAN 14
+network_name: "Mgmt-Forge-Net"
+
+# Template
+template_name: "fedora-41-mgmt"
+
+# Cloud-init
+root_password: "unix"
+admin_user: "admin"
+admin_password: "unix"
+domain: "engatwork.com"
