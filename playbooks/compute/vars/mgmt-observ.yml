@@ -33,7 +33,10 @@ admin_password: "unix"
 domain: "engatwork.com"
 
 # disk-prep knobs
-# Root disk already 100 GiB from the observ preset — leave grow off.
-root_disk_grow_to_gb: 0
+# Target in-VM root size. The observ preset already allocates 100 GiB at
+# the oVirt disk level, so the oVirt resize is a no-op; but the template
+# image ships with /dev/sda4 sized to ~4 GiB, so the in-VM grow (growpart
+# + btrfs resize) still has to run to reclaim the rest.
+root_disk_grow_to_gb: 100
 # No extra disks; observability backends use PVCs on ceph-rbd.
 extra_disks: []

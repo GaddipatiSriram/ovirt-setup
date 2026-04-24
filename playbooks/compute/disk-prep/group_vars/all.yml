@@ -6,7 +6,15 @@
 # endpoint + auth details, which are the same across every cluster.
 #
 # Knobs a cluster vars file may declare:
-#   root_disk_grow_to_gb: 100           # optional; 0/unset = skip grow
+#   root_disk_grow_to_gb: 100
+#     Target in-VM root size.  Set this even when the deploy_vms preset
+#     already allocates that much at the oVirt disk level — the template
+#     images ship with /dev/sda4 at ~4 GiB and the in-VM growpart + btrfs
+#     resize must run to reclaim the rest.  oVirt-side resize is skipped
+#     if the disk is already at the target, so setting this on a fresh
+#     cluster is the normal case.  0 or unset = skip the whole root-grow
+#     flow (use only when you truly don't want to touch the root FS).
+#
 #   extra_disks:                         # optional; empty list = skip
 #     - { name_suffix: ceph-osd, size_gb: 500 }
 

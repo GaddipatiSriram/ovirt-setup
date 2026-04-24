@@ -29,7 +29,12 @@ Declare these in `compute/vars/<cluster>.yml` alongside the
 `deploy_vms.yml` variables for the same cluster:
 
 ```yaml
-# Root disk target. Omit or set to 0 to skip growing.
+# Target in-VM root size. Set this even when the deploy_vms preset
+# already allocates the disk at that size — template images ship with
+# /dev/sda4 at ~4 GiB, so the in-VM growpart + btrfs resize must still
+# run to reclaim the rest. oVirt-side resize is skipped when the disk
+# is already ≥ target. Omit or set to 0 only when you don't want to
+# touch the root FS at all.
 root_disk_grow_to_gb: 100
 
 # Extra disks per VM. Empty list (or omit) to skip.
