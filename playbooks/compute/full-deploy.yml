@@ -1,0 +1,19 @@
+---
+# full-deploy.yml — One-shot cluster VM provisioning.
+#
+# Chains deploy_vms.yml (create VMs from template) with
+# disk-prep/disk-prep.yml (grow root + attach extra disks per cluster
+# recipe). Pass a single cluster vars file:
+#
+#   ansible-playbook full-deploy.yml -e @vars/mgmt-observ.yml
+#   ansible-playbook full-deploy.yml -e @vars/mgmt-storage.yml
+#
+# The imported playbooks each handle their own engine authentication,
+# so the two stages compose cleanly.
+#
+# After this completes, run cluster/k8s-bstrp/bootstrap-k8s.yml to turn
+# the VMs into a Kubernetes cluster; Phase 8 of that playbook registers
+# the cluster with ArgoCD on OKD.
+
+- import_playbook: deploy_vms.yml
+- import_playbook: disk-prep/disk-prep.yml

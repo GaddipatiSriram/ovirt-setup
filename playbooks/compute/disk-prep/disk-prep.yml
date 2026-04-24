@@ -1,0 +1,285 @@
+---
+# disk-prep.yml — Generic per-VM disk preparation via oVirt API + in-VM grow.
+#
+# Refactored from the old storage/mgmt-storage-prep/ playbook to be cluster-
+# agnostic: discovers VMs at runtime from oVirt (by {{ vm_prefix }}-*
+# name pattern), derives their VM IDs, root disk IDs, and IPs from the
+# oVirt API — no per-VM UUIDs hardcoded in an inventory file.
+#
+# Per-cluster knobs (set in compute/vars/<cluster>.yml):
+#
+#   vm_prefix: mgmt-observ
+#   root_disk_grow_to_gb: 100            # optional; 0/unset = skip root grow
+#   extra_disks:                          # optional; [] = skip extras
+#     - { name_suffix: ceph-osd, size_gb: 500 }
+#
+# Usage:
+#   ansible-playbook disk-prep.yml -e @../vars/mgmt-observ.yml
+#
+# Or invoked indirectly through compute/full-deploy.yml.
+#
+# Idempotent — re-running on a prepared cluster is a no-op.
+
+# ============================================================================
+# Play 1 — Authenticate, discover VMs, register them in runtime inventory
+# ============================================================================
+- name: Discover cluster VMs from oVirt and register runtime inventory
+  hosts: engine
+  gather_facts: false
+  tasks:
+    - name: Validate required var vm_prefix
+      ansible.builtin.assert:
+        that: vm_prefix is defined and vm_prefix | length > 0
+        fail_msg: "vm_prefix must be set (via -e @vars/<cluster>.yml)"
+
+    - name: Obtain oVirt SSO token (for raw REST calls the collection doesn't cover)
+      ansible.builtin.uri:
+        url: "{{ ovirt_engine_url }}/sso/oauth/token"
+        method: POST
+        body_format: form-urlencoded
+        body:
+          grant_type: password
+          scope: ovirt-app-api
+          username: "{{ ovirt_engine_user }}"
+          password: "{{ ovirt_engine_password }}"
+        headers: { Accept: application/json }
+        validate_certs: false
+      register: sso
+      no_log: true
+
+    - name: Expose token as a play-wide fact
+      ansible.builtin.set_fact:
+        ovirt_sso_token: "{{ sso.json.access_token }}"
+
+    - name: Authenticate to oVirt for collection modules
+      ovirt.ovirt.ovirt_auth:
+        url: "{{ ovirt_api_base }}"
+        username: "{{ ovirt_engine_user }}"
+        password: "{{ ovirt_engine_password }}"
+        insecure: true
+      register: ovirt_auth
+
+    - name: List VMs + nested reported devices (for IPs)
+      ovirt.ovirt.ovirt_vm_info:
+        auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+        pattern: "name={{ vm_prefix }}-*"
+        fetch_nested: true
+        nested_attributes:
+          - ips
+      register: vms_info
+
+    - name: Fail if no VMs discovered
+      ansible.builtin.fail:
+        msg: "No oVirt VMs match '{{ vm_prefix }}-*'. Run deploy_vms.yml first."
+      when: vms_info.ovirt_vms | length == 0
+
+    - name: Fetch disk attachments for each discovered VM
+      ansible.builtin.uri:
+        url: "{{ ovirt_api_base }}/vms/{{ item.id }}/diskattachments"
+        headers:
+          Accept: application/json
+          Authorization: "Bearer {{ ovirt_sso_token }}"
+        validate_certs: false
+      loop: "{{ vms_info.ovirt_vms }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: attachments_by_vm
+
+    - name: Register each VM in runtime inventory group 'cluster_vms'
+      ansible.builtin.add_host:
+        name: "{{ item.0.name }}"
+        groups: cluster_vms
+        ansible_host: "{{ (item.0.reported_devices | default([]) | map(attribute='ips') | select | list | first | default([]) | first | default({})).address | default('') }}"
+        ansible_user: "{{ disk_prep_ssh_user }}"
+        ansible_password: "{{ disk_prep_ssh_password }}"
+        ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+        ovirt_vm_id: "{{ item.0.id }}"
+        root_disk_id: "{{ item.1.json.disk_attachment | selectattr('bootable') | map(attribute='disk') | map(attribute='id') | list | first }}"
+        ovirt_sso_token: "{{ ovirt_sso_token }}"
+        ovirt_engine_url: "{{ ovirt_engine_url }}"
+        ovirt_api_base: "{{ ovirt_api_base }}"
+        ovirt_data_storage_domain_id: "{{ ovirt_data_storage_domain_id }}"
+      loop: "{{ vms_info.ovirt_vms | zip(attachments_by_vm.results) | list }}"
+      loop_control:
+        label: "{{ item.0.name }}"
+
+    - name: Summary of discovered VMs
+      ansible.builtin.debug:
+        msg: >-
+          {{ item.0.name }} →
+          vm_id={{ item.0.id[:8] }}…
+          root_disk={{ (item.1.json.disk_attachment | selectattr('bootable') | map(attribute='disk') | map(attribute='id') | list | first)[:8] }}…
+      loop: "{{ vms_info.ovirt_vms | zip(attachments_by_vm.results) | list }}"
+      loop_control:
+        label: "{{ item.0.name }}"
+
+# ============================================================================
+# Play 2 — Grow root disk in oVirt (skipped when root_disk_grow_to_gb unset)
+# ============================================================================
+- name: Grow root disks in oVirt
+  hosts: cluster_vms
+  gather_facts: false
+  vars:
+    target_bytes: "{{ (root_disk_grow_to_gb | default(0)) | int * 1024 * 1024 * 1024 }}"
+    do_root_grow: "{{ (root_disk_grow_to_gb | default(0) | int) > 0 }}"
+  tasks:
+    - name: Get current root disk state
+      ansible.builtin.uri:
+        url: "{{ ovirt_api_base }}/disks/{{ root_disk_id }}"
+        headers:
+          Accept: application/json
+          Authorization: "Bearer {{ ovirt_sso_token }}"
+        validate_certs: false
+      delegate_to: localhost
+      register: disk_now
+      when: do_root_grow
+
+    - name: Resize root disk if smaller than target
+      ansible.builtin.uri:
+        url: "{{ ovirt_api_base }}/disks/{{ root_disk_id }}"
+        method: PUT
+        headers:
+          Accept: application/json
+          Content-Type: application/json
+          Authorization: "Bearer {{ ovirt_sso_token }}"
+        body_format: json
+        body:
+          provisioned_size: "{{ target_bytes }}"
+        validate_certs: false
+      delegate_to: localhost
+      when:
+        - do_root_grow
+        - disk_now.json.provisioned_size | int < target_bytes | int
+
+# ============================================================================
+# Play 3 — Grow root filesystem inside the VM (skipped when not growing)
+# ============================================================================
+- name: Grow root filesystem inside VMs
+  hosts: cluster_vms
+  gather_facts: true
+  vars:
+    do_root_grow: "{{ (root_disk_grow_to_gb | default(0) | int) > 0 }}"
+  tasks:
+    - name: Ensure growpart + parted present
+      ansible.builtin.dnf:
+        name:
+          - cloud-utils-growpart
+          - parted
+        state: present
+      when: do_root_grow
+
+    - name: Rescan /dev/sda so kernel sees new size
+      ansible.builtin.shell: |
+        for h in /sys/class/scsi_device/*/device/rescan; do echo 1 > "$h"; done
+        echo 1 > /sys/block/sda/device/rescan || true
+      changed_when: false
+      when: do_root_grow
+
+    - name: Grow partition 4 to fill disk
+      ansible.builtin.command: growpart /dev/sda 4
+      register: gp
+      changed_when: "'CHANGED' in gp.stdout"
+      failed_when: gp.rc not in [0, 1]   # rc=1 => NOCHANGE, acceptable
+      when: do_root_grow
+
+    - name: Grow btrfs root filesystem
+      ansible.builtin.command: btrfs filesystem resize max /
+      register: bt
+      changed_when: "'new size' in (bt.stdout | lower)"
+      when: do_root_grow
+
+    - name: Report new root size
+      ansible.builtin.command: df -h /
+      register: df_out
+      changed_when: false
+
+    - ansible.builtin.debug:
+        msg: "{{ df_out.stdout_lines }}"
+
+# ============================================================================
+# Play 4 — Create & attach extra disks per cluster recipe (skipped if empty)
+# ============================================================================
+- name: Attach extra disks
+  hosts: cluster_vms
+  gather_facts: false
+  vars:
+    extras: "{{ extra_disks | default([]) }}"
+    # Trailing numeric suffix, e.g. mgmt-storage-01 → "01". Empty if VM
+    # names don't follow that convention (extras still work, alias just
+    # falls back to the plain name_suffix).
+    vm_index: "{{ inventory_hostname | regex_search('-([0-9]+)$', '\\1') | default('', true) }}"
+  tasks:
+    - name: Skip when no extra_disks declared
+      ansible.builtin.meta: end_host
+      when: extras | length == 0
+
+    - name: List existing disk attachments
+      ansible.builtin.uri:
+        url: "{{ ovirt_api_base }}/vms/{{ ovirt_vm_id }}/diskattachments"
+        headers:
+          Accept: application/json
+          Authorization: "Bearer {{ ovirt_sso_token }}"
+        validate_certs: false
+      delegate_to: localhost
+      register: attachments
+
+    - name: Fetch details of each attached disk (for alias matching)
+      ansible.builtin.uri:
+        url: "{{ ovirt_api_base }}/disks/{{ item.disk.id }}"
+        headers:
+          Accept: application/json
+          Authorization: "Bearer {{ ovirt_sso_token }}"
+        validate_certs: false
+      delegate_to: localhost
+      loop: "{{ attachments.json.disk_attachment }}"
+      loop_control:
+        label: "{{ item.disk.id }}"
+      register: disk_details
+
+    - name: Compute set of already-attached disk aliases
+      ansible.builtin.set_fact:
+        existing_aliases: "{{ disk_details.results | map(attribute='json') | map(attribute='alias') | list }}"
+
+    - name: Create and attach each missing extra disk
+      ansible.builtin.uri:
+        url: "{{ ovirt_api_base }}/vms/{{ ovirt_vm_id }}/diskattachments"
+        method: POST
+        headers:
+          Accept: application/json
+          Content-Type: application/json
+          Authorization: "Bearer {{ ovirt_sso_token }}"
+        body_format: json
+        body:
+          disk:
+            alias: "{{ item.name_suffix }}-{{ vm_index }}"
+            name: "{{ item.name_suffix }}-{{ vm_index }}"
+            provisioned_size: "{{ item.size_gb | int * 1024 * 1024 * 1024 }}"
+            format: cow
+            sparse: true
+            storage_domains:
+              storage_domain:
+                - id: "{{ ovirt_data_storage_domain_id }}"
+          interface: virtio_scsi
+          bootable: false
+          active: true
+        validate_certs: false
+        status_code: [200, 201]
+      delegate_to: localhost
+      loop: "{{ extras }}"
+      loop_control:
+        label: "{{ item.name_suffix }}-{{ vm_index }}"
+      when: (item.name_suffix + '-' + vm_index) not in existing_aliases
+
+    - name: Rescan SCSI in VM so new disks are visible
+      ansible.builtin.shell: |
+        for h in /sys/class/scsi_host/host*/scan; do echo '- - -' > "$h"; done
+      changed_when: false
+
+    - name: List non-root disks visible to the VM
+      ansible.builtin.shell: |
+        lsblk -dn -o NAME,SIZE,TYPE | awk '$3=="disk" && $1!="sda"{print}'
+      register: extras_visible
+      changed_when: false
+
+    - ansible.builtin.debug:
+        msg: "extra disks on {{ inventory_hostname }}: {{ extras_visible.stdout_lines }}"

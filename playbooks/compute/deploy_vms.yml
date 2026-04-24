@@ -59,6 +59,11 @@
         memory_guaranteed: 8GiB
         cpu_cores: 4
         disk_size: 50GiB
+      observ:
+        memory: 16GiB
+        memory_guaranteed: 8GiB
+        cpu_cores: 4
+        disk_size: 100GiB
 
     # Network (default from template, or override)
     # Options:

@@ -9,6 +9,9 @@ Playbooks for managing cloud images, VM templates, and VM deployment.
 | `download_cloud_images.yml` | Download and upload cloud images to oVirt |
 | `create_template.yml` | Create VM template from cloud image |
 | `deploy_vms.yml` | Deploy VMs from template |
+| `disk-prep/disk-prep.yml` | Grow root disk + attach extra data disks per cluster recipe (discovery-driven, no per-VM UUIDs required) |
+| `full-deploy.yml` | Wrapper: runs `deploy_vms.yml` then `disk-prep/disk-prep.yml` with a single cluster vars file |
+| `cleanup_vms.yml` | Delete VMs created by `deploy_vms.yml` |
 
 ## Usage
 
@@ -22,10 +25,29 @@ ansible-playbook playbooks/compute/download_cloud_images.yml -e "images_to_downl
 ansible-playbook playbooks/compute/create_template.yml
 ansible-playbook playbooks/compute/create_template.yml -e "image_source=rocky9 template_name=rocky-9-prod"
 
-# Deploy VMs
+# Deploy VMs (just the VMs)
 ansible-playbook playbooks/compute/deploy_vms.yml
 ansible-playbook playbooks/compute/deploy_vms.yml -e "vm_count=5 vm_size=large"
+
+# Full cluster deploy (VMs + disk-prep in one shot)
+ansible-playbook playbooks/compute/full-deploy.yml -e @playbooks/compute/vars/mgmt-observ.yml
+ansible-playbook playbooks/compute/full-deploy.yml -e @playbooks/compute/vars/mgmt-storage.yml
+
+# Disk-prep only (re-runs idempotently on existing VMs)
+ansible-playbook playbooks/compute/disk-prep/disk-prep.yml -e @playbooks/compute/vars/mgmt-storage.yml
 ```
+
+## Size presets (for `vm_size:`)
+
+| Preset | Memory | CPU | Root disk | Typical use |
+|---|---|---|---|---|
+| `small` | 1 GiB | 1 | 20 GiB | smoke tests |
+| `medium` | 2 GiB | 2 | 40 GiB | dev sidecars |
+| `large` | 4 GiB | 4 | 80 GiB | workload nodes |
+| `okd` | 16 GiB | 4 | 120 GiB | OKD SNO / mgmt-forge |
+| `sno` | 32 GiB | 8 | 120 GiB | OpenShift SNO full |
+| `storage` | 16 GiB | 4 | 50 GiB | Ceph OSD nodes (+ extra OSD disk via disk-prep) |
+| `observ` | 16 GiB | 4 | 100 GiB | Prometheus / Loki / Grafana backends |
 
 ## Available Cloud Images
 

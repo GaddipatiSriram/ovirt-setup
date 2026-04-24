@@ -1,15 +1,26 @@
 ---
-# MGMT Observability VMs - 3 VMs on MGMT_OBSERV network (10.10.3.0/24)
-# Usage: ansible-playbook deploy_vms.yml -e @vars/mgmt-observ.yml
+# MGMT Observability VMs — 3 VMs on MGMT_OBSERV network (10.10.3.0/24).
+# Hosts Prometheus, Alertmanager, Grafana, Loki, Tempo. Needs a 100 GiB
+# root for container image churn, Prometheus WAL, Loki chunks on node
+# local before they spill to Ceph PVCs.
+#
+# Usage (full lifecycle):
+#   ansible-playbook full-deploy.yml -e @vars/mgmt-observ.yml
+# or standalone:
+#   ansible-playbook deploy_vms.yml -e @vars/mgmt-observ.yml
+#   ansible-playbook disk-prep/disk-prep.yml -e @vars/mgmt-observ.yml
 
 # VM naming
 vm_prefix: "mgmt-observ"
 vm_count: 3
 
-# VM size
-vm_size: "medium"
+# VM size — observ preset: 16 GiB RAM, 4 cores, 100 GiB disk.
+# 40 GiB (medium) caused DiskPressure on the previous build; see
+# cluster/eks-bootstrap-argo.md §5 for the "containerd metadata fills
+# root" gotcha that motivated this bump.
+vm_size: "observ"
 
-# Network - VLAN 12
+# Network — VLAN 12
 network_name: "Mgmt-Observ-Net"
 
 # Template
@@ -20,3 +31,9 @@ root_password: "unix"
 admin_user: "admin"
 admin_password: "unix"
 domain: "engatwork.com"
+
+# disk-prep knobs
+# Root disk already 100 GiB from the observ preset — leave grow off.
+root_disk_grow_to_gb: 0
+# No extra disks; observability backends use PVCs on ceph-rbd.
+extra_disks: []

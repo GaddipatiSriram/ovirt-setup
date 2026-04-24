@@ -1,0 +1,27 @@
+---
+# Generic disk-prep — oVirt API connection info.
+#
+# Per-cluster sizing knobs live in compute/vars/<cluster>.yml alongside
+# the deploy_vms.yml vars file. This group_vars only holds the oVirt
+# endpoint + auth details, which are the same across every cluster.
+#
+# Knobs a cluster vars file may declare:
+#   root_disk_grow_to_gb: 100           # optional; 0/unset = skip grow
+#   extra_disks:                         # optional; empty list = skip
+#     - { name_suffix: ceph-osd, size_gb: 500 }
+
+# oVirt API
+ovirt_engine_fqdn: "ovirt.engatwork.com"
+ovirt_engine_user: "admin@ovirt@internalsso"
+ovirt_engine_password: "unix"
+ovirt_engine_url: "https://{{ ovirt_engine_fqdn }}/ovirt-engine"
+ovirt_api_base: "{{ ovirt_engine_url }}/api"
+
+# Storage domain that backs newly-created extra disks.
+# (The OS disk lives on whatever domain the template was imported into.)
+ovirt_data_storage_domain_id: "f1ef667d-65ae-4506-994a-bebe9488e250"
+ovirt_data_storage_domain_name: "data_lun"
+
+# In-VM SSH credentials (matches deploy_vms.yml cloud-init defaults).
+disk_prep_ssh_user: root
+disk_prep_ssh_password: unix

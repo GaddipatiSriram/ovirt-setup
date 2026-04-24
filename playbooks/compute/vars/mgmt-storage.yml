@@ -29,7 +29,11 @@ admin_user: "admin"
 admin_password: "unix"
 domain: "engatwork.com"
 
-# Storage-specific: Additional disks for OSDs (added separately)
-# Each node should have:
-#   - 50GB OS disk (from template)
-#   - 100GB+ OSD disk (added after VM creation)
+# disk-prep knobs
+# Grow root to 50 GiB (previously done by the old mgmt-storage-prep
+# playbook's group_vars). Kept for re-runs against existing nodes; if
+# already at 50 GiB the grow is a no-op.
+root_disk_grow_to_gb: 50
+# Each storage node needs one 500 GiB OSD disk for Ceph.
+extra_disks:
+  - { name_suffix: ceph-osd, size_gb: 500 }
