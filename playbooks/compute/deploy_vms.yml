@@ -172,6 +172,10 @@
       register: created_vms
 
     # ==================== CONFIGURE NETWORK ====================
+    # When vm_macs is set in the cluster vars file, each VM gets the MAC at
+    # its (1-indexed) position. This pairs with Kea host reservations so
+    # rebuilds always land on the same IPs — see
+    # playbooks/network/pfsense/pin_dhcp_leases.yml.
     - name: Configure VM network
       ovirt.ovirt.ovirt_nic:
         auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
@@ -180,6 +184,7 @@
         profile: "{{ network_name }}"
         network: "{{ network_name }}"
         interface: virtio
+        mac_address: "{{ (vm_macs | default([]))[item - 1] | default(omit) }}"
         state: present
       loop: "{{ range(1, vm_count|int + 1) | list }}"
       loop_control:

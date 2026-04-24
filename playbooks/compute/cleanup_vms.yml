@@ -1,20 +1,30 @@
 ---
-# cleanup_vms.yml - Delete VMs created by deploy_vms.yml
-# Run: ansible-playbook -i inventory.ini cleanup_vms.yml
+# cleanup_vms.yml — Delete VMs + release their DHCP leases on pfSense Kea.
 #
-# Override with:
-#   ansible-playbook -i inventory.ini cleanup_vms.yml -e "vm_prefix=dev-app"
-#   ansible-playbook -i inventory.ini cleanup_vms.yml -e "vm_count=5"
+# Flow:
+#   1. Auth to oVirt.
+#   2. Fetch each VM's NIC MAC (before deletion — oVirt drops NIC records
+#      as soon as the VM is gone).
+#   3. Delete the VMs.
+#   4. Release the corresponding Kea leases so the IPs drop back to the
+#      free pool and the next deploy_vms.yml run reclaims them.
+#
+# Usage:
+#   ansible-playbook cleanup_vms.yml -e "vm_prefix=mgmt-observ vm_count=3"
+#   ansible-playbook cleanup_vms.yml -e "vm_prefix=dev-apps    vm_count=5"
+#
+# Skip the pfSense step with -e skip_dhcp_cleanup=true if pfSense is
+# unreachable.
 
-- name: Cleanup VMs
+- name: Cleanup VMs (oVirt side)
   hosts: engine
   become: true
   gather_facts: false
 
   vars:
-    # VM naming (must match deploy_vms.yml)
     vm_prefix: "mgmt-core"
     vm_count: 3
+    skip_dhcp_cleanup: false
 
   tasks:
     # ==================== AUTHENTICATE ====================
@@ -37,6 +47,58 @@
           - "{% for i in range(1, vm_count|int + 1) %}  - {{ vm_prefix }}-{{ '%02d' | format(i) }}\n{% endfor %}"
           - "=============================================="
 
+    # ==================== CAPTURE MACS (before delete) ====================
+    - name: Look up each VM before deletion
+      ovirt.ovirt.ovirt_vm_info:
+        auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
+        pattern: "name={{ vm_prefix }}-{{ '%02d' | format(item) }}"
+      loop: "{{ range(1, vm_count|int + 1) | list }}"
+      loop_control:
+        label: "{{ vm_prefix }}-{{ '%02d' | format(item) }}"
+      register: vm_lookups
+
+    - name: Get an SSO bearer token for raw oVirt REST calls
+      ansible.builtin.uri:
+        url: "https://{{ ovirt_engine_fqdn }}/ovirt-engine/sso/oauth/token"
+        method: POST
+        body_format: form-urlencoded
+        body:
+          grant_type: password
+          scope: ovirt-app-api
+          username: "admin@ovirt@internalsso"
+          password: "{{ ovirt_engine_admin_password }}"
+        headers: { Accept: application/json }
+        validate_certs: false
+      register: sso
+      no_log: true
+
+    - name: Fetch NICs (and their MACs) for each discovered VM
+      ansible.builtin.uri:
+        url: "https://{{ ovirt_engine_fqdn }}/ovirt-engine/api/vms/{{ item.ovirt_vms[0].id }}/nics"
+        headers:
+          Accept: application/json
+          Authorization: "Bearer {{ sso.json.access_token }}"
+        validate_certs: false
+      loop: "{{ vm_lookups.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: item.ovirt_vms | length > 0
+      register: nic_fetches
+
+    - name: Collect captured MACs
+      ansible.builtin.set_fact:
+        captured_macs: "{{ (captured_macs | default([])) + [item.json.nic[0].mac.address] }}"
+      loop: "{{ nic_fetches.results }}"
+      loop_control:
+        label: "{{ item.item.item }}"
+      when:
+        - item.json is defined
+        - item.json.nic | default([]) | length > 0
+
+    - name: Report MACs captured for post-delete DHCP cleanup
+      ansible.builtin.debug:
+        msg: "Captured {{ captured_macs | length }} MAC(s): {{ captured_macs }}"
+
     # ==================== DELETE VMs ====================
     - name: Stop and delete VMs
       ovirt.ovirt.ovirt_vm:
@@ -56,12 +118,89 @@
         state: absent
         ovirt_auth: "{{ ovirt_auth.ansible_facts.ovirt_auth }}"
 
+    # ==================== STASH MACS FOR NEXT PLAY ====================
+    - name: Stash captured MACs as a play-global fact for the pfSense play
+      ansible.builtin.set_fact:
+        cleanup_captured_macs: "{{ captured_macs }}"
+
+    # ==================== REGISTER PFSENSE HOST ====================
+    # Adds pfsense-fw to the runtime inventory so the next play can reach
+    # it without the caller having to load a second -i file. Mirrors the
+    # credentials in playbooks/network/pfsense/inventory.yml.
+    - name: Register pfSense host for DHCP cleanup play
+      ansible.builtin.add_host:
+        name: pfsense-fw
+        groups: pfsense_cleanup
+        ansible_host: 192.168.0.101
+        ansible_user: admin
+        ansible_password: unix
+        ansible_python_interpreter: /usr/local/bin/python3.11
+        ansible_ssh_common_args: '-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
+      when: not (skip_dhcp_cleanup | bool)
+
     # ==================== SUMMARY ====================
-    - name: Display cleanup summary
+    - name: Display cleanup summary (oVirt side)
       ansible.builtin.debug:
         msg:
           - "=============================================="
-          - "VM Cleanup Complete!"
+          - "VM Cleanup Complete (oVirt side)"
           - "=============================================="
           - "Deleted {{ vm_count }} VMs with prefix '{{ vm_prefix }}'"
+          - "Captured {{ captured_macs | length }} MAC(s) for DHCP cleanup"
           - "=============================================="
+
+# =============================================================================
+# Second play — release the DHCP leases for the deleted VMs' MACs.
+# Runs against the pfSense host; inherits captured_macs via hostvars['localhost'].
+# Skipped entirely when skip_dhcp_cleanup=true.
+# =============================================================================
+- name: Release DHCP leases on pfSense
+  hosts: pfsense_cleanup
+  gather_facts: false
+  become: false
+  vars:
+    kea_socket: /tmp/kea4-ctrl-socket
+    # Pull MACs discovered in the previous play.
+    release_macs: "{{ hostvars['localhost'].cleanup_captured_macs | default([]) }}"
+    skip_dhcp_cleanup: "{{ hostvars['localhost'].skip_dhcp_cleanup | default(false) }}"
+  tasks:
+    - name: Skip if requested or nothing to release
+      ansible.builtin.meta: end_play
+      when: skip_dhcp_cleanup | bool or (release_macs | length) == 0
+
+    - name: Query Kea for all DHCP4 leases
+      ansible.builtin.shell: |
+        echo -n '{"command":"lease4-get-all"}' | nc -U {{ kea_socket }}
+      register: kea_all
+      changed_when: false
+
+    - name: Select leases whose hw-address matches a captured MAC
+      ansible.builtin.set_fact:
+        leases_to_release: >-
+          {{
+            (kea_all.stdout | from_json).arguments.leases
+            | selectattr('hw-address', 'defined')
+            | selectattr('hw-address', 'in', (release_macs | map('lower') | list))
+            | list
+            | unique(attribute='ip-address')
+          }}
+
+    - name: Report leases that will be released
+      ansible.builtin.debug:
+        msg: "{{ leases_to_release | map(attribute='ip-address') | zip(leases_to_release | map(attribute='hw-address')) | list }}"
+
+    - name: Delete each matching lease via Kea lease4-del
+      ansible.builtin.shell: |
+        echo -n '{"command":"lease4-del","arguments":{"ip-address":"{{ item['ip-address'] }}"}}' \
+          | nc -U {{ kea_socket }}
+      register: del_results
+      changed_when: (del_results.stdout | from_json).result == 0
+      failed_when: (del_results.stdout | from_json).result not in [0, 3]
+      loop: "{{ leases_to_release }}"
+      loop_control:
+        label: "{{ item['ip-address'] }}"
+      when: leases_to_release | length > 0
+
+    - name: Summary (DHCP side)
+      ansible.builtin.debug:
+        msg: "Released {{ leases_to_release | length }} DHCP lease(s) for the deleted VMs."

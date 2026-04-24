@@ -40,3 +40,25 @@ domain: "engatwork.com"
 root_disk_grow_to_gb: 100
 # No extra disks; observability backends use PVCs on ceph-rbd.
 extra_disks: []
+
+# Deterministic MAC + IP pinning.
+#
+# Without this, pfSense Kea's iterative allocator drifts the cluster
+# onto new IPs on every rebuild. vm_macs hand oVirt a stable MAC per
+# VM index; vm_ips declare the pinned IPs and are applied to Kea as
+# soft reservations by playbooks/network/pfsense/pin_dhcp_leases.yml.
+#
+# MAC convention: 56:6f:1b:ff:<vlan_hex>:<idx>  — `56:6f:1b:` is the
+# oVirt-default OUI (so there's no conflict with its auto-pool); `ff`
+# marks this as a hand-assigned slot distinct from oVirt's auto range;
+# `<vlan_hex>` is this cluster's VLAN id in hex; `<idx>` is the VM
+# suffix (01, 02, …). For mgmt-observ: VLAN 12 = 0x0c.
+vm_macs:
+  - "56:6f:1b:ff:0c:01"
+  - "56:6f:1b:ff:0c:02"
+  - "56:6f:1b:ff:0c:03"
+
+vm_ips:
+  - "10.10.3.100"
+  - "10.10.3.101"
+  - "10.10.3.102"

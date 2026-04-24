@@ -1,0 +1,121 @@
+---
+# release_dhcp_leases.yml — Delete DHCP leases from the pfSense Kea server.
+#
+# Why this exists: when we destroy a VM via oVirt (cleanup_vms.yml), the
+# guest never sends a DHCPRELEASE and the lease rots on pfSense until
+# the default 24 h timer expires.  Meanwhile the pool's next free IP
+# drifts forward, so the next rebuild lands on a different address than
+# the original.  This playbook is the missing piece — after the VMs are
+# deleted, release their leases so the IPs go back into the pool.
+#
+# pfSense CE ≥ 2.8 runs Kea DHCP, not ISC dhcpd.  Kea exposes the
+# lease4-del command via its control socket at /tmp/kea4-ctrl-socket
+# (lease_cmds hook loaded by default).  We shell out to `nc -U` to
+# send JSON commands and parse responses in Python.
+#
+# Usage — pick any of three match modes (or combine):
+#
+#   # by MAC (preferred — captured from oVirt before VM delete)
+#   ansible-playbook release_dhcp_leases.yml \
+#     -e 'release_macs=["56:6f:1b:6a:00:25","56:6f:1b:6a:00:26"]'
+#
+#   # by IP
+#   ansible-playbook release_dhcp_leases.yml \
+#     -e 'release_ips=["10.10.3.100","10.10.3.101"]'
+#
+#   # by hostname (substring match)
+#   ansible-playbook release_dhcp_leases.yml \
+#     -e 'release_hostnames=["mgmt-observ"]'
+
+- name: Release DHCP leases on pfSense Kea
+  hosts: pfsense
+  gather_facts: false
+  become: false
+  vars:
+    release_macs: []
+    release_ips: []
+    release_hostnames: []
+    kea_socket: /tmp/kea4-ctrl-socket
+  tasks:
+    - name: Validate at least one match list is provided
+      ansible.builtin.assert:
+        that: >
+          (release_macs | length > 0) or
+          (release_ips | length > 0) or
+          (release_hostnames | length > 0)
+        fail_msg: >-
+          Provide one of release_macs, release_ips, release_hostnames via
+          -e. Nothing to do otherwise.
+
+    - name: Query Kea for all DHCP4 leases
+      ansible.builtin.shell: |
+        echo -n '{"command":"lease4-get-all"}' | nc -U {{ kea_socket }}
+      register: kea_all
+      changed_when: false
+
+    - name: Parse Kea response
+      ansible.builtin.set_fact:
+        all_leases: "{{ (kea_all.stdout | from_json).arguments.leases }}"
+
+    - name: Select leases matching provided IPs / MACs / hostname-prefixes
+      # Match rules, in order:
+      #   release_ips — exact IP match.
+      #   release_macs — exact hw-address match (case-insensitive).
+      #   release_hostnames — PREFIX match anchored at start, then a dash
+      #     or end-of-string.  Guards against "mgmt-observ" accidentally
+      #     matching "mgmt-observability-proxy" or unrelated entries that
+      #     share a substring.
+      ansible.builtin.set_fact:
+        matching_leases_unique: >-
+          {{
+            (
+              (all_leases | selectattr('ip-address', 'in', release_ips) | list)
+              +
+              (all_leases | selectattr('hw-address', 'defined')
+                          | selectattr('hw-address', 'in',
+                              (release_macs | map('lower') | list))
+                          | list)
+              +
+              (all_leases | selectattr('hostname', 'defined')
+                          | selectattr('hostname', 'match',
+                              '^(' + (release_hostnames | join('|')) + ')(-|$)')
+                          | list
+                          if release_hostnames | length > 0 else [])
+            ) | unique(attribute='ip-address')
+          }}
+
+    - name: Report leases that will be released
+      ansible.builtin.debug:
+        msg: "{{ matching_leases_unique | map(attribute='ip-address') | zip(matching_leases_unique | map(attribute='hw-address'), matching_leases_unique | map(attribute='hostname', default='-')) | list }}"
+
+    - name: End if nothing matched
+      ansible.builtin.meta: end_play
+      when: matching_leases_unique | length == 0
+
+    - name: Delete each matching lease via Kea lease4-del
+      ansible.builtin.shell: |
+        echo -n '{"command":"lease4-del","arguments":{"ip-address":"{{ item['ip-address'] }}"}}' \
+          | nc -U {{ kea_socket }}
+      register: del_results
+      changed_when: (del_results.stdout | from_json).result == 0
+      failed_when: (del_results.stdout | from_json).result not in [0, 3]
+      loop: "{{ matching_leases_unique }}"
+      loop_control:
+        label: "{{ item['ip-address'] }} ({{ item['hw-address'] }})"
+
+    - name: Summary
+      ansible.builtin.debug:
+        msg: >-
+          Released {{ del_results.results
+                      | selectattr('stdout', 'defined')
+                      | map(attribute='stdout')
+                      | map('from_json')
+                      | selectattr('result', 'equalto', 0)
+                      | list | length }} lease(s);
+          {{ del_results.results | length -
+             (del_results.results
+              | selectattr('stdout', 'defined')
+              | map(attribute='stdout')
+              | map('from_json')
+              | selectattr('result', 'equalto', 0)
+              | list | length) }} already gone.

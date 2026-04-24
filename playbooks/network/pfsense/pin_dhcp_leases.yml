@@ -1,0 +1,132 @@
+---
+# pin_dhcp_leases.yml — Create Kea "soft reservations" by pre-seeding leases
+# that pin specific MAC addresses to specific IPs.
+#
+# pfSense on our setup only loads Kea's lease_cmds hook (not host_cmds), so
+# we can't add proper host reservations over the control socket. What we
+# CAN do is call lease4-add with the desired MAC/IP pair and a long
+# valid-lifetime. When the VM with that MAC sends DHCPDISCOVER, Kea sees
+# the existing lease for its hw-address and re-offers the same IP —
+# functionally equivalent to a reservation, just stored in the lease DB.
+#
+# Prereqs:
+#   - Target VMs use deterministic MACs (set `vm_macs` in the cluster
+#     vars file that drives deploy_vms.yml).
+#   - Same vars file also declares `vm_ips` — the IPs we want pinned
+#     (same cardinality as vm_macs).
+#
+# Usage:
+#   ansible-playbook pin_dhcp_leases.yml -e @../../compute/vars/mgmt-observ.yml
+#
+# Idempotent:
+#   - If a lease already exists at the target IP bound to a different
+#     MAC, it is deleted first (lease4-del by ip-address).
+#   - If a lease already exists for the target MAC at a different IP,
+#     it is deleted first (lease4-del by ip-address after discovery).
+#   - Then lease4-add writes the desired pairing.
+
+- name: Pin DHCP leases on pfSense Kea
+  hosts: pfsense
+  gather_facts: false
+  become: false
+  vars:
+    kea_socket: /tmp/kea4-ctrl-socket
+    # Kea lease4-add requires subnet-id. We discover it per target IP by
+    # asking Kea for the subnet config and matching by CIDR.
+    # A year is long enough that Kea treats the pinned leases as durable;
+    # client DHCPREQUEST renewals extend it further.
+    pin_valid_lifetime: 31536000    # 1 year, seconds
+  tasks:
+    - name: Validate vm_macs and vm_ips are set and paired
+      ansible.builtin.assert:
+        that:
+          - vm_macs is defined and (vm_macs | length) > 0
+          - vm_ips  is defined and (vm_ips  | length) > 0
+          - (vm_macs | length) == (vm_ips | length)
+        fail_msg: "vm_macs and vm_ips must both be set and the same length"
+
+    - name: Query Kea for current subnet config
+      ansible.builtin.shell: |
+        echo -n '{"command":"config-get"}' | nc -U {{ kea_socket }}
+      register: kea_cfg
+      changed_when: false
+
+    - name: Parse Kea subnet4 list
+      ansible.builtin.set_fact:
+        kea_subnet4: "{{ (kea_cfg.stdout | from_json).arguments.Dhcp4.subnet4 }}"
+
+    - name: Build "first 3 octets" → subnet-id map
+      # e.g. "10.10.3" -> 3. Lets us resolve a target IP's subnet-id by
+      # looking up its three-octet prefix.
+      ansible.builtin.set_fact:
+        kea_subnet_by_prefix: "{{ kea_subnet_by_prefix | default({}) | combine({ (item.subnet.split('/')[0].split('.')[0:3] | join('.')): item.id }) }}"
+      loop: "{{ kea_subnet4 }}"
+      loop_control:
+        label: "{{ item.subnet }} → id {{ item.id }}"
+
+    - name: Query Kea for existing leases
+      ansible.builtin.shell: |
+        echo -n '{"command":"lease4-get-all"}' | nc -U {{ kea_socket }}
+      register: kea_all
+      changed_when: false
+
+    - name: Build pair list (mac,ip,subnet-id)
+      ansible.builtin.set_fact:
+        pin_plan: >-
+          {{
+            vm_macs | zip(vm_ips) | list
+            | map('list') | list
+          }}
+
+    - name: Delete any lease currently holding a target IP
+      ansible.builtin.shell: |
+        echo -n '{"command":"lease4-del","arguments":{"ip-address":"{{ item[1] }}"}}' \
+          | nc -U {{ kea_socket }}
+      register: del_by_ip
+      changed_when: (del_by_ip.stdout | from_json).result == 0
+      failed_when: (del_by_ip.stdout | from_json).result not in [0, 3]
+      loop: "{{ pin_plan }}"
+      loop_control:
+        label: "ip={{ item[1] }}"
+
+    - name: Delete any lease currently bound to a target MAC (different IP)
+      ansible.builtin.shell: |
+        MAC="{{ item[0] | lower }}"
+        echo -n '{"command":"lease4-get-by-hw-address","arguments":{"hw-address":"'"$MAC"'"}}' \
+          | nc -U {{ kea_socket }} \
+          | python3.11 -c 'import json,sys; d=json.load(sys.stdin); [print(l["ip-address"]) for l in d.get("arguments",{}).get("leases",[])]' \
+          | while read ip; do
+              echo -n "{\"command\":\"lease4-del\",\"arguments\":{\"ip-address\":\"$ip\"}}" \
+                | nc -U {{ kea_socket }}
+            done
+      register: del_by_mac
+      changed_when: del_by_mac.stdout != ""
+      loop: "{{ pin_plan }}"
+      loop_control:
+        label: "mac={{ item[0] }}"
+
+    - name: Resolve subnet-id for each target IP (by 3-octet prefix)
+      ansible.builtin.set_fact:
+        pin_plan_with_subnet: "{{ pin_plan_with_subnet | default([]) + [[item[0], item[1], kea_subnet_by_prefix[item[1].split('.')[0:3] | join('.')]]] }}"
+      loop: "{{ pin_plan }}"
+      loop_control:
+        label: "{{ item[1] }}"
+
+    - name: Create the pinned lease for each (mac, ip)
+      ansible.builtin.shell: |
+        echo -n '{"command":"lease4-add","arguments":{
+          "hw-address":"{{ item[0] | lower }}",
+          "ip-address":"{{ item[1] }}",
+          "subnet-id":{{ item[2] }},
+          "valid-lft":{{ pin_valid_lifetime }}
+        }}' | nc -U {{ kea_socket }}
+      register: pin_results
+      changed_when: (pin_results.stdout | from_json).result == 0
+      failed_when: (pin_results.stdout | from_json).result != 0
+      loop: "{{ pin_plan_with_subnet }}"
+      loop_control:
+        label: "{{ item[0] }} -> {{ item[1] }} (subnet {{ item[2] }})"
+
+    - name: Summary
+      ansible.builtin.debug:
+        msg: "Pinned {{ pin_plan_with_subnet | length }} lease(s): {{ pin_plan_with_subnet | map('join', ' -> ') | list }}"
