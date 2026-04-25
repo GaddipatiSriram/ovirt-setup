@@ -22,3 +22,18 @@ root_password: "unix"
 admin_user: "admin"
 admin_password: "unix"
 domain: "engatwork.com"
+
+# disk-prep knobs.
+#
+# mgmt-core was originally provisioned at vm_size:medium (40 GiB root) before
+# the disk-prep workflow existed.  Container image churn (CoreDNS rolls,
+# MetalLB updates, etc.) gradually filled the root partition past kubelet's
+# eviction threshold, evicting CoreDNS and breaking the platform's
+# authoritative DNS upstream.  Same failure mode mgmt-observability hit.
+#
+# Bumping root to 100 GiB on the live cluster: oVirt-side resize is
+# non-disruptive (hypervisor expands the virtual disk); in-VM growpart +
+# btrfs resize are online operations on btrfs, no reboot required.  After
+# this runs, DiskPressure clears and pending CoreDNS pods schedule.
+root_disk_grow_to_gb: 100
+extra_disks: []
