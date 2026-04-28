@@ -1,0 +1,55 @@
+---
+# MGMT Workload — runner / ephemeral-workload plane.
+#
+# Co-located with OKD on VLAN 11 (DevOps VPC, 10.10.2.0/24).
+# OKD runs at .110-.112 (control plane + worker masters) with API VIP
+# .50 and ingress VIP .51 — all configured statically in OpenShift's
+# MachineNetwork, NOT via pfSense DHCP.
+#
+# mgmt-workload sits at .120, MetalLB pool .211-.220 (OKD doesn't run
+# MetalLB; the .200-.210 range stays reserved for any future OKD
+# LoadBalancer needs).
+#
+# Single-node cluster — accepted SPOF for the workload plane. When the
+# 2nd oVirt host arrives, expand to 1 CP + N workers for HA.
+#
+# Role split (informs what runs here vs OKD):
+#   OKD (control plane, durable):
+#     - ArgoCD SRE + DevOps (existing)
+#     - Crossplane core + providers (manages remote clusters via
+#       provider-kubernetes ProviderConfig)
+#     - Gateway control plane (Envoy/Kong xDS)
+#     - Keycloak (eventually migrated from mgmt-forge)
+#     - Backstage (developer portal)
+#
+#   mgmt-workload (workload plane, ephemeral / bursty / non-cross-cluster):
+#     - actions-runner-controller (controller + listeners + runners,
+#       Shape 1 — ARC isn't cross-cluster-capable so it lives entirely
+#       on the cluster where its workloads run)
+#     - Pattern A baseline (cert-manager, ingress-nginx, ESO, trivy,
+#       rook-ceph-external) auto-generated via AppSet selectors
+#     - Future: preview environments, ad-hoc workloads, anything that
+#       benefits from "we'd be fine losing this for an hour"
+
+vm_prefix: "mgmt-workload"
+vm_count: 1
+vm_size: "okd"                          # 16 GiB / 4 cores / 120 GiB root
+network_name: "Mgmt-DevOps-Net"         # VLAN 11 — shared with OKD
+template_name: "fedora-41-mgmt"
+
+root_password: "unix"
+admin_user: "admin"
+admin_password: "unix"
+domain: "engatwork.com"
+
+# disk-prep
+root_disk_grow_to_gb: 100
+extra_disks: []                         # PVCs via ceph-rbd from mgmt-storage
+
+# Deterministic MAC + IP pinning (cluster_id byte 'fd' distinguishes
+# mgmt-workload from OKD which uses oVirt-auto MAC range 56:6f:1b:6a:*)
+vm_macs:
+  - "56:6f:1b:fd:0b:01"
+
+vm_ips:
+  - "10.10.2.120"
