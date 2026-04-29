@@ -49,6 +49,16 @@
         memory_guaranteed: 8GiB
         cpu_cores: 4
         disk_size: 120GiB
+      workload:
+        # 3 × 8 GiB = 24 GiB committed for a 3-node mgmt-workload cluster.
+        # Sized to fit alongside mgmt-control (3 × 16) within the 251 GiB
+        # single-host budget (no-overcommit). Tight per node — ARC
+        # controller + runners only; bursty workloads spawn agent pods
+        # that go away.
+        memory: 8GiB
+        memory_guaranteed: 4GiB
+        cpu_cores: 4
+        disk_size: 80GiB
       sno:
         memory: 32GiB
         memory_guaranteed: 16GiB
