@@ -1,0 +1,53 @@
+---
+# MGMT Control — durable control-plane services.
+#
+# 3-node kubeadm cluster on VLAN 11 (DevOps VPC, 10.10.2.0/24).
+# Replaces the OKD compact 3-node cluster; takes over .110-.112 after
+# OKD is destroyed in Phase 2 of the okd-to-control-plane migration.
+#
+# Co-located with mgmt-workload on the same VLAN. mgmt-workload sits at
+# .120, MetalLB pool .211-.220. mgmt-control's MetalLB pool is .200-.210
+# (carved from the range that was previously held informally by OKD's
+# pfSense HAProxy VIPs, which stay disjoint from MetalLB).
+#
+# 3-node HA topology — etcd quorum survives one node loss. Durable,
+# long-lived, low-traffic. The workload plane handles ephemeral load.
+#
+# What runs here (per cplanes plan):
+#   - ArgoCD SRE  (vanilla helm chart, replaces OperatorHub-installed
+#     OpenShift GitOps)
+#   - ArgoCD DevOps (same)
+#   - Argo Workflows (DAG-based platform jobs)
+#   - Jenkins (legacy CI; chart at cplanes/devops/jenkins/)
+#   - Crossplane core + providers (cross-cluster IaC)
+#   - Backstage (developer portal — replaces OpenShift console)
+#   - Pattern A baseline (cert-manager, ingress-nginx, ESO, MetalLB,
+#     trivy-operator) via AppSet selectors
+
+vm_prefix: "mgmt-control"
+vm_count: 3
+vm_size: "okd"                          # 16 GiB / 4 cores / 120 GiB root
+network_name: "Mgmt-DevOps-Net"         # VLAN 11
+template_name: "fedora-41-mgmt"
+
+root_password: "unix"
+admin_user: "admin"
+admin_password: "unix"
+domain: "engatwork.com"
+
+# disk-prep
+root_disk_grow_to_gb: 100
+extra_disks: []                         # PVCs via ceph-rbd from mgmt-storage
+
+# Deterministic MAC + IP pinning (cluster_id byte 'fb' distinguishes
+# mgmt-control from mgmt-workload 'fd' and the legacy OKD oVirt-auto
+# range 56:6f:1b:6a:*).
+vm_macs:
+  - "56:6f:1b:fb:0b:01"
+  - "56:6f:1b:fb:0b:02"
+  - "56:6f:1b:fb:0b:03"
+
+vm_ips:
+  - "10.10.2.110"
+  - "10.10.2.111"
+  - "10.10.2.112"

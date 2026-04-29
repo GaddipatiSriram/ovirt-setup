@@ -1,26 +1,22 @@
 ---
 # MGMT Workload — runner / ephemeral-workload plane.
 #
-# Co-located with OKD on VLAN 11 (DevOps VPC, 10.10.2.0/24).
-# OKD runs at .110-.112 (control plane + worker masters) with API VIP
-# .50 and ingress VIP .51 — all configured statically in OpenShift's
-# MachineNetwork, NOT via pfSense DHCP.
+# Co-located with mgmt-control on VLAN 11 (DevOps VPC, 10.10.2.0/24).
+# mgmt-control runs at .110-.112 (3-node HA control plane), MetalLB
+# pool .200-.210, ingress VIP .200.
 #
-# mgmt-workload sits at .120, MetalLB pool .211-.220 (OKD doesn't run
-# MetalLB; the .200-.210 range stays reserved for any future OKD
-# LoadBalancer needs).
+# mgmt-workload sits at .120, MetalLB pool .211-.220.
 #
 # Single-node cluster — accepted SPOF for the workload plane. When the
 # 2nd oVirt host arrives, expand to 1 CP + N workers for HA.
 #
-# Role split (informs what runs here vs OKD):
-#   OKD (control plane, durable):
-#     - ArgoCD SRE + DevOps (existing)
+# Role split (informs what runs here vs mgmt-control):
+#   mgmt-control (control plane, durable):
+#     - ArgoCD SRE + DevOps (vanilla helm; replaces OpenShift GitOps)
+#     - Argo Workflows + Jenkins (platform CI/CD)
 #     - Crossplane core + providers (manages remote clusters via
 #       provider-kubernetes ProviderConfig)
-#     - Gateway control plane (Envoy/Kong xDS)
-#     - Keycloak (eventually migrated from mgmt-forge)
-#     - Backstage (developer portal)
+#     - Backstage (developer portal — replaces OpenShift console)
 #
 #   mgmt-workload (workload plane, ephemeral / bursty / non-cross-cluster):
 #     - actions-runner-controller (controller + listeners + runners,
